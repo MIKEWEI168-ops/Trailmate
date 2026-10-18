@@ -818,7 +818,7 @@ select.rowsel{flex:1;}
   </div>
   <div class="card" style="margin-top:10px">
     <div class="row"><select id="map-trip" class="rowsel"></select><select id="map-day" class="rowsel"></select></div>
-    <div class="row" style="margin-top:6px"><label class="small" style="display:flex;align-items:center;gap:6px"><input type="checkbox" id="map-showroute" checked> 顯示本日路線</label><span style="flex:1"></span><button class="btn-ghost" id="map-navday">🧭 導航</button><button class="btn-ghost" id="map-dlday">⬇ 離線下載</button></div>
+    <div class="row" style="margin-top:6px"><label class="small" style="display:flex;align-items:center;gap:6px"><input type="checkbox" id="map-showroute" checked> 本日路線</label><label class="small" style="display:flex;align-items:center;gap:6px;margin-left:10px"><input type="checkbox" id="map-showfull"> 全程路線</label><span style="flex:1"></span><button class="btn-ghost" id="map-navday">🧭 導航</button><button class="btn-ghost" id="map-dlday">⬇ 離線下載</button></div>
     <div class="row" style="margin-top:6px"><button class="btn-ghost" id="map-draw">✏️ 畫路線</button><button class="btn-ghost" id="map-draw-del" style="color:var(--danger);display:none">🗑 自訂</button><span class="small muted" id="map-draw-hint"></span></div>
     <div class="muted small" style="margin-top:6px">記錄的軌跡會歸到上面選的行程／天數。</div>
   </div>
@@ -1097,6 +1097,7 @@ function customRoute(){return (S.customRoutes||{})[S.activeTrip+':'+S.activeDay]
 function polylineKm(pts){let d=0;for(let i=1;i<pts.length;i++)d+=havKm(pts[i-1][0],pts[i-1][1],pts[i][0],pts[i][1]);return d;}
 function startDraw(){
   if(!S.activeTrip){toast('請先選行程');return;}
+  const sf=$('#map-showfull');if(sf&&sf.checked){sf.checked=false;}
   initMap();if(drawMode)endDraw(false);
   if(routeLayer){map.removeLayer(routeLayer);routeLayer=null;}
   const cr=customRoute();
@@ -1130,11 +1131,47 @@ function updDrawBtn(){
   $('#map-draw-hint').textContent=cr?('自訂 '+cr.km+' km'):'';
   $('#map-draw-del').style.display=cr?'':'none';
 }
+function renderFullTrip(){
+  const TR=trailsFor(S.activeTrip);
+  if(!TR)return;
+  const days=daysOf(S.activeTrip);
+  const n=Math.min(TR.length,days.length);
+  const bounds=[];
+  for(let di=0;di<n;di++){
+    const dayN=di+1;
+    const cr=(S.customRoutes||{})[S.activeTrip+':'+dayN];
+    if(cr&&cr.pts&&cr.pts.length>=2){
+      L.polyline(cr.pts,{color:'#0d9488',weight:4,opacity:0.85}).addTo(routeLayer);
+      cr.pts.forEach(p=>bounds.push(p));
+      L.tooltip({permanent:true,direction:'top',className:'dist-tip',interactive:false}).setLatLng(cr.pts[0]).setContent('D'+dayN).addTo(routeLayer);
+    }else{
+      const td=TR[di];
+      if(!td||!td.routes)continue;
+      td.routes.forEach(r=>{
+        const pts=r.pts||(r.via?r.via.map(k=>[td.stops[k][1],td.stops[k][2]]):null);
+        if(!pts||!pts.length)return;
+        L.polyline(pts,{color:r.c,weight:4,opacity:0.85}).addTo(routeLayer);
+        pts.forEach(p=>bounds.push(p));
+      });
+      if(td.stops&&td.stops.length){
+        L.tooltip({permanent:true,direction:'top',className:'dist-tip',interactive:false}).setLatLng([td.stops[0][1],td.stops[0][2]]).setContent('D'+dayN).addTo(routeLayer);
+      }
+    }
+  }
+  if(bounds.length)map.fitBounds(bounds,{padding:[40,40]});
+}
 function renderDayRoute(){
   if(!map)return;
   if(routeLayer){map.removeLayer(routeLayer);routeLayer=null;}
   centerMapForTrip();
   if(drawMode)return;
+  const showFull=$('#map-showfull')&&$('#map-showfull').checked;
+  if(showFull){
+    routeLayer=L.layerGroup().addTo(map);
+    renderFullTrip();
+    updDrawBtn();
+    return;
+  }
   const cb=$('#map-showroute');
   const t=trip(S.activeTrip);
   const TR=trailsFor(S.activeTrip);
@@ -1743,6 +1780,7 @@ function bind(){
   $('#map-trip').onchange=e=>{if(drawMode)endDraw(false);S.activeTrip=e.target.value;S.activeDay=1;save();ensureTripDay();renderDayRoute();};
   $('#map-day').onchange=e=>{if(drawMode)endDraw(false);S.activeDay=+e.target.value;save();ensureTripDay();renderDayRoute();};
   $('#map-showroute').onchange=()=>renderDayRoute();
+  $('#map-showfull').onchange=()=>renderDayRoute();
   $('#map-navday').onclick=navDayRoute;
   $('#map-dlday').onclick=()=>{const bb=dayRouteBBox();if(!bb){toast('此天無路線可下載');return;}openDlModal(bb,'離線導航 D'+S.activeDay);};
   $('#di-trip').onchange=e=>{S.activeTrip=e.target.value;S.activeDay=1;save();ensureTripDay();renderDiary();};
