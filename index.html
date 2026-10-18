@@ -762,6 +762,7 @@ select.rowsel{flex:1;}
     <button class="btn-ghost" id="back-trips">‹ 返回行程</button>
     <div class="row" style="align-items:center"><h2 id="td-name" style="margin:0;flex:1;min-width:0"></h2><button class="btn-ghost" id="btn-edit-trip">✏️</button></div><div id="td-meta" class="muted small"></div>
     <div class="card" style="padding:6px 14px"><div id="td-days"></div></div>
+    <button class="btn" id="btn-add-day" style="width:100%;margin-top:8px">＋ 加一天</button>
     <button class="btn-ghost" id="btn-del-trip" style="color:var(--danger)">刪除此行程</button>
   </div>
   <div id="day-detail-page" hidden>
@@ -786,6 +787,7 @@ select.rowsel{flex:1;}
       <div class="row" style="margin-top:6px"><input id="st-code" placeholder="確認碼（選填）" style="flex:1;min-width:0"><select id="st-status" style="flex:1;min-width:0"><option value="">未安排</option><option value="pending">待訂</option><option value="booked">已訂</option></select></div>
       <button class="btn btn-primary" id="st-save" style="width:100%;margin-top:8px">儲存住宿</button>
     </div>
+    <div class="row" style="margin-top:4px"><button class="btn" id="dd-add-after">＋ 在此後加一天</button><span style="flex:1"></span><button class="btn-ghost" id="dd-del-day" style="color:var(--danger)">刪除這一天</button></div>
   </div>
 </section>
 <section class="view" id="view-map">
@@ -808,10 +810,16 @@ select.rowsel{flex:1;}
       <div class="muted small" id="nearby-status" style="margin-top:6px">資料來自 OpenStreetMap，需網路連線。</div>
       <div id="nearby-list"></div>
     </div>
+    <div id="draw-bar" class="rec-panel" hidden>
+      <div class="row"><b>✏️ 繪製路線</b><span class="muted small" id="draw-count" style="margin-left:6px">0 點</span><span style="flex:1"></span><button class="btn-ghost" id="draw-cancel">✕</button></div>
+      <div class="muted small">點地圖新增路線點，可拖曳平移</div>
+      <div class="row" style="margin-top:6px"><button class="btn" id="draw-undo">↩ 復原</button><button class="btn" id="draw-clear">清除</button><span style="flex:1"></span><button class="btn btn-primary" id="draw-done">✓ 完成</button></div>
+    </div>
   </div>
   <div class="card" style="margin-top:10px">
     <div class="row"><select id="map-trip" class="rowsel"></select><select id="map-day" class="rowsel"></select></div>
     <div class="row" style="margin-top:6px"><label class="small" style="display:flex;align-items:center;gap:6px"><input type="checkbox" id="map-showroute" checked> 顯示本日路線</label><span style="flex:1"></span><button class="btn-ghost" id="map-navday">🧭 導航</button><button class="btn-ghost" id="map-dlday">⬇ 離線下載</button></div>
+    <div class="row" style="margin-top:6px"><button class="btn-ghost" id="map-draw">✏️ 畫路線</button><button class="btn-ghost" id="map-draw-del" style="color:var(--danger);display:none">🗑 自訂</button><span class="small muted" id="map-draw-hint"></span></div>
     <div class="muted small" style="margin-top:6px">記錄的軌跡會歸到上面選的行程／天數。</div>
   </div>
   <div class="card"><h3 style="margin-top:0">已下載的離線地圖</h3><div id="map-regions"><span class="muted small">尚未下載。把想去的區域移到地圖中央，按 ⬇ 下載。</span></div></div>
@@ -939,6 +947,7 @@ function seed(){
 }
 let S=null;
 function load(){try{const r=localStorage.getItem(LS);if(r){S=JSON.parse(r);if(!S.expenses)S.expenses={};
+  if(!S.customRoutes)S.customRoutes={};
   if(!S.stay){S.stay={};if(S.trips.some(t=>t.id==='trip-dolomites'))DOLOMITES.forEach((t,i)=>{S.stay['trip-dolomites:'+(i+1)]={name:t,code:'',status:''};});save();}
   if(typeof seedExtraTrips!=='undefined'&&seedExtraTrips(S))save();
   return;}}catch(e){}S=seed();save();}
@@ -1036,6 +1045,14 @@ function centerMapForTrip(){
   if(!hasTR){const h=TRIP_HOME[S.activeTrip];if(h)map.setView([h[0],h[1]],h[2]);}
 }
 function dayRouteBBox(){
+  const cr=customRoute();
+  const cpts=cr?cr.pts:null;
+  if(cpts&&cpts.length){
+    let w=180,s=90,e=-180,n=-90;
+    cpts.forEach(p=>{if(p[1]<w)w=p[1];if(p[1]>e)e=p[1];if(p[0]<s)s=p[0];if(p[0]>n)n=p[0];});
+    const dw=(e-w)*0.15+0.01,dn=(n-s)*0.15+0.01;
+    return {w:w-dw,s:s-dn,e:e+dw,n:n+dn};
+  }
   const TR=trailsFor(S.activeTrip);if(!TR)return null;
   const td=TR[S.activeDay-1];if(!td||!td.routes)return null;
   let w=180,s=90,e=-180,n=-90,found=false;
@@ -1045,25 +1062,78 @@ function dayRouteBBox(){
   return {w:w-dw,s:s-dn,e:e+dw,n:n+dn};
 }
 function navDayRoute(){
+  const cr=customRoute();
+  if(cr&&cr.pts.length>=2){
+    const a=cr.pts[0],b=cr.pts[cr.pts.length-1];
+    window.open('https://www.google.com/maps/dir/?api=1&origin='+a[0]+','+a[1]+'&destination='+b[0]+','+b[1]+'&travelmode=walking','_blank');
+    return;
+  }
   const TR=trailsFor(S.activeTrip);if(!TR){toast('此行程無路線資料');return;}
   const td=TR[S.activeDay-1];
   if(!td||!td.stops||!td.stops.length){toast('此天無路線資料');return;}
   const a=td.stops[0],b=td.stops[td.stops.length-1];
   window.open('https://www.google.com/maps/dir/?api=1&origin='+a[1]+','+a[2]+'&destination='+b[1]+','+b[2]+'&travelmode=walking','_blank');
 }
+/* ============ 自訂路線（手畫） ============ */
+let drawMode=null,drawLine=null;
+function customRoute(){return (S.customRoutes||{})[S.activeTrip+':'+S.activeDay]||null;}
+function polylineKm(pts){let d=0;for(let i=1;i<pts.length;i++)d+=havKm(pts[i-1][0],pts[i-1][1],pts[i][0],pts[i][1]);return d;}
+function startDraw(){
+  if(!S.activeTrip){toast('請先選行程');return;}
+  initMap();if(drawMode)endDraw(false);
+  if(routeLayer){map.removeLayer(routeLayer);routeLayer=null;}
+  const cr=customRoute();
+  drawMode={pts:cr?cr.pts.map(p=>[p[0],p[1]]):[]};
+  $('#draw-bar').hidden=false;map.on('click',onDrawClick);updDrawUI();
+}
+function onDrawClick(e){drawMode.pts.push([Math.round(e.latlng.lat*1e5)/1e5,Math.round(e.latlng.lng*1e5)/1e5]);updDrawUI();}
+function updDrawUI(){
+  $('#draw-count').textContent=drawMode.pts.length+' 點';
+  if(drawLine){map.removeLayer(drawLine);drawLine=null;}
+  if(drawMode.pts.length>1)drawLine=L.polyline(drawMode.pts,{color:'#0d9488',weight:4}).addTo(map);
+}
+function endDraw(saveIt){
+  if(!drawMode)return;
+  map.off('click',onDrawClick);
+  if(drawLine){map.removeLayer(drawLine);drawLine=null;}
+  $('#draw-bar').hidden=true;
+  if(saveIt){
+    if(drawMode.pts.length<2)toast('至少需要 2 個點才存');
+    else{const km=Math.round(polylineKm(drawMode.pts)*10)/10;
+      if(!S.customRoutes)S.customRoutes={};
+      S.customRoutes[S.activeTrip+':'+S.activeDay]={pts:drawMode.pts,km:km};
+      save();toast('自訂路線已儲存（'+km+' km）');}
+  }
+  drawMode=null;updDrawBtn();renderDayRoute();
+}
+function updDrawBtn(){
+  const b=$('#map-draw');if(!b)return;
+  const cr=customRoute();
+  b.textContent=cr?'✏️ 重畫路線':'✏️ 畫路線';
+  $('#map-draw-hint').textContent=cr?('自訂 '+cr.km+' km'):'';
+  $('#map-draw-del').style.display=cr?'':'none';
+}
 function renderDayRoute(){
   if(!map)return;
   if(routeLayer){map.removeLayer(routeLayer);routeLayer=null;}
   centerMapForTrip();
+  if(drawMode)return;
   const cb=$('#map-showroute');
   const t=trip(S.activeTrip);
   const TR=trailsFor(S.activeTrip);
-  if(!(cb&&cb.checked)||!t||!TR)return;
-  const td=TR[S.activeDay-1];
-  if(!td||!td.stops||!td.stops.length)return;
+  const cr=customRoute();
+  let td=null;
+  if(cb&&cb.checked&&t&&TR){td=TR[S.activeDay-1];if(!td||!td.stops||!td.stops.length)td=null;}
+  if(!cr&&!td){updDrawBtn();return;}
   routeLayer=L.layerGroup().addTo(map);
-  const colorOf=i=>{for(const r of td.routes){if(r.via.indexOf(i)>=0)return r.c;}return '#0d9488';};
   const bounds=[];
+  if(cr){
+    L.polyline(cr.pts,{color:'#0d9488',weight:4,opacity:0.85}).addTo(routeLayer);
+    cr.pts.forEach(p=>bounds.push(p));
+    const mid=cr.pts[Math.floor(cr.pts.length/2)];
+    L.tooltip({permanent:true,direction:'center',className:'dist-tip',interactive:false}).setLatLng(mid).setContent(cr.km+' km（自訂）').addTo(routeLayer);
+  }else{
+  const colorOf=i=>{for(const r of td.routes){if(r.via.indexOf(i)>=0)return r.c;}return '#0d9488';};
   td.stops.forEach((s,idx)=>{
     const c=colorOf(idx);
     const icon=L.divIcon({className:'',html:'<div style="width:26px;height:26px;border-radius:50%;background:'+c+';color:#fff;font-size:13px;font-weight:700;display:flex;align-items:center;justify-content:center;border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.4)">'+(idx+1)+'</div>',iconSize:[26,26],iconAnchor:[13,13]});
@@ -1078,7 +1148,9 @@ function renderDayRoute(){
       L.tooltip({permanent:true,direction:'center',className:'dist-tip',interactive:false}).setLatLng(mid).setContent(r.km+' km').addTo(routeLayer);
     }
   });
+  }
   if(bounds.length)map.fitBounds(bounds,{padding:[40,40]});
+  updDrawBtn();
 }
 function startRec(){
   if(!navigator.geolocation){toast('此裝置不支援定位');return;}
@@ -1213,6 +1285,45 @@ function openTrip(id){
   $('#td-days').querySelectorAll('[data-day]').forEach(r=>r.onclick=()=>openDay(id,+r.getAttribute('data-day')));
   showTripsPage('trip-detail-page');
 }
+/* ============ 增減天數 ============ */
+function keyShift(stores,keyFn,tid,pos,delta,maxN){
+  if(delta>0){for(let n=maxN;n>=pos;n--){const a=keyFn(tid,n),b=keyFn(tid,n+1);stores.forEach(st=>{if(st&&st[a]!==undefined){st[b]=st[a];delete st[a];}});}}
+  else{const a0=keyFn(tid,pos);stores.forEach(st=>{if(st)delete st[a0];});for(let n=pos+1;n<=maxN;n++){const a=keyFn(tid,n),b=keyFn(tid,n-1);stores.forEach(st=>{if(st&&st[a]!==undefined){st[b]=st[a];delete st[a];}});}}
+}
+async function shiftTrackDays(tid,pos,delta){
+  try{
+    const keys=await idbKeys('tracks');
+    for(const k of keys){const tr=await idbGet('tracks',k);if(!tr||tr.tripId!==tid)continue;
+      if(delta>0&&tr.dayN>=pos){tr.dayN++;await idbPut('tracks',k,tr);}
+      else if(delta<0){if(tr.dayN===pos)await idbDel('tracks',k);else if(tr.dayN>pos){tr.dayN--;await idbPut('tracks',k,tr);}}}
+  }catch(e){}
+}
+async function addDay(tid,afterN){
+  const days=daysOf(tid);if(!days.length){toast('行程還沒有天數');return null;}
+  const pos=afterN?afterN+1:days.length+1;
+  const prevD=days[pos-2],nd=new Date(prevD.date+'T12:00:00');nd.setDate(nd.getDate()+1);
+  keyShift([S.diary],dkey,tid,pos,+1,days.length);
+  keyShift([S.expenses,S.stay,S.customRoutes],(t,n)=>t+':'+n,tid,pos,+1,days.length);
+  days.splice(pos-1,0,{n:pos,date:iso(nd),title:'',note:'',stats:null});
+  for(let i=pos;i<days.length;i++){const dd=new Date(days[i].date+'T12:00:00');dd.setDate(dd.getDate()+1);days[i].date=iso(dd);}
+  days.forEach((d,i)=>d.n=i+1);
+  await shiftTrackDays(tid,pos,+1);
+  save();return pos;
+}
+function deleteDay(tid,n){
+  const days=daysOf(tid);
+  if(days.length<=1){toast('行程至少要保留一天');return;}
+  confirmDlg('刪除 D'+n+'（'+fmtMD(days[n-1].date)+'）？這天的日記、軌跡、支出、住宿、自訂路線都會一起刪除。',async()=>{
+    keyShift([S.diary],dkey,tid,n,-1,days.length);
+    keyShift([S.expenses,S.stay,S.customRoutes],(t,x)=>t+':'+x,tid,n,-1,days.length);
+    days.splice(n-1,1);
+    for(let i=n-1;i<days.length;i++){const dd=new Date(days[i].date+'T12:00:00');dd.setDate(dd.getDate()-1);days[i].date=iso(dd);}
+    days.forEach((d,i)=>d.n=i+1);
+    await shiftTrackDays(tid,n,-1);
+    if(S.activeDay>n)S.activeDay--;if(S.activeDay>days.length)S.activeDay=days.length;
+    save();openTrip(tid);toast('已刪除 D'+n);
+  });
+}
 async function renderDayTracks(){
   const el=$('#dd-tracks');if(!el||$('#day-detail-page').hidden)return;
   const keys=await idbKeys('tracks');const list=[];
@@ -1258,18 +1369,64 @@ function renderDayStats(){
   const card=$('#dd-stats-card'),el=$('#dd-stats');
   if(!card||!el||$('#day-detail-page').hidden)return;
   const d=daysOf(S.activeTrip)[S.activeDay-1],s=d&&d.stats;
-  if(!s){card.hidden=true;return;}
   card.hidden=false;
-  const mo=+String(d.date).slice(5,7);
-  el.innerHTML='<div class="stat-grid">'
-    +'<span class="stat"><b>'+s.km+'</b> <span>km</span></span>'
-    +'<span class="stat"><b>↑'+s.up+'</b> <span>m</span></span>'
-    +'<span class="stat"><b>↓'+s.down+'</b> <span>m</span></span>'
-    +'<span class="stat"><b>'+s.hrs+'</b> <span>小時</span></span></div>'
-    +'<div class="muted small" style="margin-top:8px">🌧 '+s.tmin+'–'+s.tmax+'°C（'+mo+'月常見）・降雨約 '+s.rain+' 天</div>'
-    +'<div class="row" style="margin-top:8px"><button class="btn" id="dd-navday">🧭 Google Maps 導航</button><button class="btn" id="dd-dlday">⬇ 離線下載</button></div>';
-  $('#dd-navday').onclick=navDayRoute;
-  $('#dd-dlday').onclick=()=>{const bb=dayRouteBBox();if(!bb){toast('此天無路線可下載');return;}openDlModal(bb,'離線導航 D'+S.activeDay);};
+  if(!s||!Object.keys(s).length){
+    el.innerHTML='<button class="btn" id="dd-stats-add" style="width:100%">＋ 新增每日數據（距離／爬升／時間／氣候）</button>';
+    $('#dd-stats-add').onclick=()=>statsModal();
+    return;
+  }
+  const mo=+String(d.date).slice(5,7),parts=[];
+  if(s.km)parts.push('<span class="stat"><b>'+s.km+'</b> <span>km</span></span>');
+  if(s.up!=null)parts.push('<span class="stat"><b>↑'+s.up+'</b> <span>m</span></span>');
+  if(s.down!=null)parts.push('<span class="stat"><b>↓'+s.down+'</b> <span>m</span></span>');
+  if(s.hrs)parts.push('<span class="stat"><b>'+esc(s.hrs)+'</b> <span>小時</span></span>');
+  let wx='';
+  if(s.tmin!=null&&s.tmax!=null)wx='🌧 '+s.tmin+'–'+s.tmax+'°C（'+mo+'月常見）';
+  else if(s.tmax!=null)wx='🌧 最高 '+s.tmax+'°C（'+mo+'月常見）';
+  else if(s.tmin!=null)wx='🌧 最低 '+s.tmin+'°C（'+mo+'月常見）';
+  if(s.rain)wx+=(wx?'・':'🌧 ')+'降雨約 '+esc(s.rain)+' 天';
+  const TR=trailsFor(S.activeTrip),td=TR&&TR[S.activeDay-1];
+  const cr=customRoute();
+  const hasRoute=!!cr||!!(td&&td.stops&&td.stops.length);
+  el.innerHTML='<div class="stat-grid">'+parts.join('')+'</div>'
+    +(wx?'<div class="muted small" style="margin-top:8px">'+wx+'</div>':'')
+    +'<div class="row" style="margin-top:8px">'
+    +(hasRoute?'<button class="btn" id="dd-navday">🧭 導航</button><button class="btn" id="dd-dlday">⬇ 離線下載</button>':'')
+    +'<span style="flex:1"></span><button class="btn-ghost" id="dd-stats-edit">✏️ 數據</button></div>';
+  if(hasRoute){
+    $('#dd-navday').onclick=navDayRoute;
+    $('#dd-dlday').onclick=()=>{const bb=dayRouteBBox();if(!bb){toast('此天無路線可下載');return;}openDlModal(bb,'離線導航 D'+S.activeDay);};
+  }
+  $('#dd-stats-edit').onclick=()=>statsModal();
+}
+function statsModal(){
+  const d=daysOf(S.activeTrip)[S.activeDay-1],s=d.stats||{};
+  const has=Object.keys(s).length>0;
+  openModal('<h3 style="margin-top:0">每日數據</h3>'
+    +'<div class="row"><div><label class="lbl">距離 (km)</label><input id="sm-km" type="number" inputmode="decimal" value="'+(s.km||'')+'"></div>'
+    +'<div><label class="lbl">時間 (小時)</label><input id="sm-hrs" value="'+esc(s.hrs||'')+'" placeholder="如 5–6"></div></div>'
+    +'<div class="row"><div><label class="lbl">爬升 (m)</label><input id="sm-up" type="number" inputmode="numeric" value="'+(s.up!=null?s.up:'')+'"></div>'
+    +'<div><label class="lbl">下降 (m)</label><input id="sm-down" type="number" inputmode="numeric" value="'+(s.down!=null?s.down:'')+'"></div></div>'
+    +'<div class="row"><div><label class="lbl">低溫 (°C)</label><input id="sm-tmin" type="number" inputmode="numeric" value="'+(s.tmin!=null?s.tmin:'')+'"></div>'
+    +'<div><label class="lbl">高溫 (°C)</label><input id="sm-tmax" type="number" inputmode="numeric" value="'+(s.tmax!=null?s.tmax:'')+'"></div></div>'
+    +'<label class="lbl">降雨 (如 17/30)</label><input id="sm-rain" value="'+esc(s.rain||'')+'">'
+    +'<div class="row" style="margin-top:12px">'
+    +(has?'<button class="btn" id="sm-del" style="color:var(--danger)">刪除</button>':'')
+    +'<span style="flex:1"></span><button class="btn" id="sm-cancel">取消</button><button class="btn btn-primary" id="sm-save">儲存</button></div>');
+  $('#sm-cancel').onclick=closeModal;
+  if(has)$('#sm-del').onclick=()=>{d.stats=null;save();closeModal();renderDayStats();toast('已刪除');};
+  $('#sm-save').onclick=()=>{
+    const v=id=>$('#'+id).value.trim(),st={};
+    if(v('sm-km'))st.km=+v('sm-km');
+    if(v('sm-hrs'))st.hrs=v('sm-hrs');
+    if(v('sm-up')!=='')st.up=+v('sm-up');
+    if(v('sm-down')!=='')st.down=+v('sm-down');
+    if(v('sm-tmin')!=='')st.tmin=+v('sm-tmin');
+    if(v('sm-tmax')!=='')st.tmax=+v('sm-tmax');
+    if(v('sm-rain'))st.rain=v('sm-rain');
+    d.stats=Object.keys(st).length?st:null;
+    save();closeModal();renderDayStats();toast('已更新');
+  };
 }
 function openDay(tid,n){
   curDayTrip=tid;S.activeTrip=tid;S.activeDay=n;save();ensureTripDay();
@@ -1381,6 +1538,7 @@ window.addEventListener('beforeinstallprompt',e=>{e.preventDefault();deferredPro
 /* ============ router & init ============ */
 let mapInited=false;
 function showTab(name){
+  if(name!=='map'&&drawMode)endDraw(false);
   $$('nav.tabs button').forEach(b=>b.classList.toggle('active',b.getAttribute('data-tab')===name));
   $$('.view').forEach(v=>v.classList.toggle('active',v.id==='view-'+name));
   $('#top-title').textContent='TrailMate';
@@ -1397,6 +1555,15 @@ function bind(){
   $('#back-trips').onclick=()=>{renderTrips();showTripsPage('trips-list-page');};
   $('#back-trip').onclick=()=>openTrip(S.activeTrip);
   $('#btn-del-trip').onclick=()=>{const t=trip(S.activeTrip);confirmDlg('刪除行程「'+t.name+'」？日記與軌跡關聯會保留在裝置上。',()=>{S.trips=S.trips.filter(x=>x.id!==t.id);delete S.days[t.id];S.activeTrip=S.trips.length?S.trips[0].id:null;S.activeDay=1;save();ensureTripDay();renderTrips();showTripsPage('trips-list-page');});};
+  $('#btn-add-day').onclick=async()=>{const p=await addDay(S.activeTrip);if(p){openTrip(S.activeTrip);toast('已新增 D'+p);}};
+  $('#dd-add-after').onclick=async()=>{const p=await addDay(S.activeTrip,S.activeDay);if(p)openDay(S.activeTrip,p);};
+  $('#dd-del-day').onclick=()=>deleteDay(S.activeTrip,S.activeDay);
+  $('#map-draw').onclick=startDraw;
+  $('#map-draw-del').onclick=()=>confirmDlg('刪除這天的自訂路線？會恢復顯示原本的規劃路線。',()=>{delete S.customRoutes[S.activeTrip+':'+S.activeDay];save();updDrawBtn();renderDayRoute();});
+  $('#draw-undo').onclick=()=>{if(drawMode){drawMode.pts.pop();updDrawUI();}};
+  $('#draw-clear').onclick=()=>{if(drawMode){drawMode.pts=[];updDrawUI();}};
+  $('#draw-done').onclick=()=>endDraw(true);
+  $('#draw-cancel').onclick=()=>endDraw(false);
   $('#btn-edit-trip').onclick=()=>{
     const t=trip(S.activeTrip);if(!t)return;
     openModal('<h3 style="margin-top:0">編輯行程</h3>'+
@@ -1556,8 +1723,8 @@ function bind(){
   }
   $('#nb-addr-go').onclick=nbAddrSearch;
   $('#nb-addr').addEventListener('keydown',e=>{if(e.key==='Enter')nbAddrSearch();});
-  $('#map-trip').onchange=e=>{S.activeTrip=e.target.value;S.activeDay=1;save();ensureTripDay();renderDayRoute();};
-  $('#map-day').onchange=e=>{S.activeDay=+e.target.value;save();ensureTripDay();renderDayRoute();};
+  $('#map-trip').onchange=e=>{if(drawMode)endDraw(false);S.activeTrip=e.target.value;S.activeDay=1;save();ensureTripDay();renderDayRoute();};
+  $('#map-day').onchange=e=>{if(drawMode)endDraw(false);S.activeDay=+e.target.value;save();ensureTripDay();renderDayRoute();};
   $('#map-showroute').onchange=()=>renderDayRoute();
   $('#map-navday').onclick=navDayRoute;
   $('#map-dlday').onclick=()=>{const bb=dayRouteBBox();if(!bb){toast('此天無路線可下載');return;}openDlModal(bb,'離線導航 D'+S.activeDay);};
