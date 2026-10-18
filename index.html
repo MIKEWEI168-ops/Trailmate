@@ -879,7 +879,7 @@ const KEPLER_TITLES = ["D1 The Hollows → Luxmore Hut（14.3km／5–6H）", "D
 const KEPLER_STATS = [{"km": 14.3, "up": 911, "down": 86, "hrs": "5–6", "tmin": 2, "tmax": 11, "rain": "17/30"}, {"km": 14.1, "up": 693, "down": 1270, "hrs": "5–6", "tmin": 1, "tmax": 9, "rain": "16/30"}, {"km": 15.7, "up": 224, "down": 505, "hrs": "5–6", "tmin": 7, "tmax": 15, "rain": "16/30"}, {"km": 18.8, "up": 243, "down": 220, "hrs": "5–6", "tmin": 8, "tmax": 16, "rain": "14/30"}];
 const KEPLER_NOTES = ["14.3km・爬升911m・下降86m・約5–6小時", "14.1km・爬升693m・下降1270m・約5–6小時", "15.7km・爬升224m・下降505m・約5–6小時", "18.8km・爬升243m・下降220m・約5–6小時"];
 const EXTRA_TRIPS = [
-  {id:'trip-camino', name:'西班牙朝聖北方之路 31 天', start:'2027-05-01', cur:'EUR', tk:'CAMINO_TITLES',
+  {id:'trip-camino', name:'西班牙朝聖北方之路 31 天', start:'2027-05-01', cur:'EUR', tk:'CAMINO_TITLES', st:'CAMINO_STATS',
    stay:{9:{name:'Albergue La Caba\u00f1a del Abuelo, G\u00fcemes',code:'',status:''},
          22:{name:'Luarca（港口飯店，待定）',code:'',status:''},
          25:{name:'Vilanova de Lourenz\u00e1',code:'',status:''}}},
@@ -891,13 +891,15 @@ const EXTRA_TRIPS = [
          4:{name:'Te Anau Lakeview Holiday Park & Motels',code:'',status:''}}}
 ];
 function seedExtraTrips(S){
-  var TL = {CAMINO_TITLES:(typeof CAMINO_TITLES!=='undefined')?CAMINO_TITLES:[], KYUSHU_TITLES:(typeof KYUSHU_TITLES!=='undefined')?KYUSHU_TITLES:[], KEPLER_TITLES:(typeof KEPLER_TITLES!=='undefined')?KEPLER_TITLES:[], KEPLER_NOTES:(typeof KEPLER_NOTES!=='undefined')?KEPLER_NOTES:[], KEPLER_STATS:(typeof KEPLER_STATS!=='undefined')?KEPLER_STATS:[]};
+  var TL = {CAMINO_TITLES:(typeof CAMINO_TITLES!=='undefined')?CAMINO_TITLES:[], KYUSHU_TITLES:(typeof KYUSHU_TITLES!=='undefined')?KYUSHU_TITLES:[], KEPLER_TITLES:(typeof KEPLER_TITLES!=='undefined')?KEPLER_TITLES:[], KEPLER_NOTES:(typeof KEPLER_NOTES!=='undefined')?KEPLER_NOTES:[], KEPLER_STATS:(typeof KEPLER_STATS!=='undefined')?KEPLER_STATS:[], CAMINO_STATS:(typeof CAMINO_STATS!=='undefined')?CAMINO_STATS:[], DOLO_STATS:(typeof DOLO_STATS!=='undefined')?DOLO_STATS:[]};
   var changed = false;
   for(var i=0;i<EXTRA_TRIPS.length;i++){var et=EXTRA_TRIPS[i];
     if(S.trips.some(function(t){return t.id===et.id;})){
-      if(et.id==='trip-kepler'&&S.days[et.id]&&typeof KEPLER_STATS!=='undefined'){
+      // backfill stats for existing users (only if day count matches original)
+      var stArr = et.st?(TL[et.st]||[]):(et.id==='trip-kepler'?TL.KEPLER_STATS:[]);
+      if(stArr.length&&S.days[et.id]&&S.days[et.id].length===stArr.length){
         var pf=false;
-        S.days[et.id].forEach(function(d,j){if(!d.stats&&KEPLER_STATS[j]){d.stats=KEPLER_STATS[j];pf=true;}});
+        S.days[et.id].forEach(function(d,j){if(!d.stats&&stArr[j]){d.stats=stArr[j];pf=true;}});
         if(pf)changed=true;
       }
       continue;
@@ -914,6 +916,8 @@ function seedExtraTrips(S){
   }
   return changed;
 }
+const CAMINO_STATS = [null, {"km": 22.1, "hrs": "6", "tmin": 10, "tmax": 19, "rain": "15/30"}, {"km": 21.1, "hrs": "5:45", "tmin": 10, "tmax": 19, "rain": "15/30"}, {"km": 23.0, "hrs": "6:15", "up": 817, "tmin": 10, "tmax": 19, "rain": "15/30"}, {"km": 25.4, "hrs": "6:45", "tmin": 10, "tmax": 19, "rain": "15/30"}, {"km": 24.0, "tmin": 10, "tmax": 19, "rain": "15/30"}, {"km": 24.4, "tmin": 10, "tmax": 19, "rain": "15/30"}, null, {"km": 34.7, "hrs": "5:15", "tmin": 10, "tmax": 19, "rain": "15/30"}, {"km": 15.3, "tmin": 10, "tmax": 19, "rain": "15/30"}, {"km": 36.3, "tmin": 10, "tmax": 19, "rain": "15/30"}, {"km": 22.2, "hrs": "5:30", "tmin": 10, "tmax": 19, "rain": "15/30"}, {"km": 28.0, "hrs": "7", "up": 539, "tmin": 10, "tmax": 19, "rain": "15/30"}, {"km": 27.0, "hrs": "6", "tmin": 10, "tmax": 19, "rain": "15/30"}, {"km": 30.0, "hrs": "7:45", "tmin": 10, "tmax": 19, "rain": "15/30"}, {"km": 20.1, "hrs": "5:15", "tmin": 10, "tmax": 19, "rain": "15/30"}, {"km": 17.5, "hrs": "4:30", "tmin": 10, "tmax": 19, "rain": "15/30"}, {"km": 29.8, "hrs": "8", "up": 655, "tmin": 10, "tmax": 19, "rain": "15/30"}, null, {"km": 19.3, "tmin": 10, "tmax": 19, "rain": "15/30"}, {"km": 18.5, "hrs": "5", "tmin": 10, "tmax": 19, "rain": "15/30"}, {"km": 17.5, "hrs": "3:45", "tmin": 10, "tmax": 19, "rain": "15/30"}, {"km": 30.5, "hrs": "7:30", "tmin": 10, "tmax": 19, "rain": "15/30"}, {"km": 22.4, "hrs": "5:30", "tmin": 10, "tmax": 19, "rain": "15/30"}, {"km": 35.6, "tmin": 10, "tmax": 19, "rain": "15/30"}, {"km": 25.6, "tmin": 10, "tmax": 19, "rain": "15/30"}, {"km": 20.8, "hrs": "5:15", "tmin": 10, "tmax": 19, "rain": "15/30"}, {"km": 18.5, "hrs": "4:30", "tmin": 10, "tmax": 19, "rain": "15/30"}, {"km": 14.9, "tmin": 10, "tmax": 19, "rain": "15/30"}, {"km": 24.9, "tmin": 10, "tmax": 19, "rain": "15/30"}, {"km": 22.0, "hrs": "5:30", "tmin": 10, "tmax": 19, "rain": "15/30"}];
+const DOLO_STATS = [null, {"km": 4.3, "hrs": "1.5–2", "tmin": 1, "tmax": 21}, {"km": 4.3, "hrs": "3", "tmin": 1, "tmax": 21}, {"km": 6.4, "hrs": "3.5", "up": 900, "tmin": 1, "tmax": 21}, {"km": 13, "hrs": "4.5", "up": 565, "tmin": 1, "tmax": 21}, {"km": 12.5, "hrs": "5", "up": 1070, "tmin": 1, "tmax": 21}, {"km": 10, "hrs": "5.5", "up": 635, "tmin": 1, "tmax": 21}, {"km": 13, "hrs": "4.5", "up": 260, "tmin": 1, "tmax": 21}, {"km": 15, "hrs": "5.5", "up": 580, "tmin": 1, "tmax": 21}, {"km": 15, "hrs": "6", "up": 850, "tmin": 1, "tmax": 21}, {"km": 9, "hrs": "4", "up": 550, "tmin": 1, "tmax": 21}, {"km": 13.5, "hrs": "5", "up": 450, "tmin": 1, "tmax": 21}, {"km": 11, "hrs": "4–5", "tmin": 1, "tmax": 21}, null, {"km": 5, "hrs": "5–6", "tmin": 1, "tmax": 21}, {"km": 9, "hrs": "4–5", "tmin": 1, "tmax": 21}, {"km": 4.8, "tmin": 1, "tmax": 21}, {"km": 10, "hrs": "4–5", "tmin": 1, "tmax": 21}, {"km": 15, "hrs": "5–6", "tmin": 1, "tmax": 21}, {"km": 10, "hrs": "3", "tmin": 1, "tmax": 21}, null];
 
 </script>
 <script>
@@ -950,6 +954,11 @@ function load(){try{const r=localStorage.getItem(LS);if(r){S=JSON.parse(r);if(!S
   if(!S.customRoutes)S.customRoutes={};
   if(!S.stay){S.stay={};if(S.trips.some(t=>t.id==='trip-dolomites'))DOLOMITES.forEach((t,i)=>{S.stay['trip-dolomites:'+(i+1)]={name:t,code:'',status:''};});save();}
   if(typeof seedExtraTrips!=='undefined'&&seedExtraTrips(S))save();
+  if(typeof DOLO_STATS!=='undefined'&&S.days['trip-dolomites']&&S.days['trip-dolomites'].length===DOLO_STATS.length){
+    let pf=false;
+    S.days['trip-dolomites'].forEach((d,j)=>{if(!d.stats&&DOLO_STATS[j]){d.stats=DOLO_STATS[j];pf=true;}});
+    if(pf)save();
+  }
   return;}}catch(e){}S=seed();save();}
 function save(){try{localStorage.setItem(LS,JSON.stringify(S));}catch(e){toast('儲存空間不足，部分資料可能沒存到');}}
 function trip(id){return S.trips.find(t=>t.id===id);}
