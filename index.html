@@ -819,7 +819,7 @@ select.rowsel{flex:1;}
   <div class="card" style="margin-top:10px">
     <div class="row"><select id="map-trip" class="rowsel"></select><select id="map-day" class="rowsel"></select></div>
     <div class="row" style="margin-top:6px"><label class="small" style="display:flex;align-items:center;gap:6px"><input type="checkbox" id="map-showroute" checked> 本日路線</label><label class="small" style="display:flex;align-items:center;gap:6px;margin-left:10px"><input type="checkbox" id="map-showfull"> 全程路線</label><span style="flex:1"></span><button class="btn-ghost" id="map-navday">🧭 導航</button><button class="btn-ghost" id="map-dlday">⬇ 離線下載</button></div>
-    <div class="row" style="margin-top:6px"><button class="btn-ghost" id="map-draw">✏️ 畫路線</button><button class="btn-ghost" id="map-draw-del" style="color:var(--danger);display:none">🗑 自訂</button><span class="small muted" id="map-draw-hint"></span></div>
+    <div class="row" style="margin-top:6px"><button class="btn-ghost" id="map-draw">✏️ 畫路線</button><button class="btn-ghost" id="map-gpx">📥 GPX</button><input type="file" id="gpx-file" accept=".gpx,application/gpx+xml" style="display:none"><button class="btn-ghost" id="map-draw-del" style="color:var(--danger);display:none">🗑 自訂</button><span class="small muted" id="map-draw-hint"></span></div>
     <div class="muted small" style="margin-top:6px">記錄的軌跡會歸到上面選的行程／天數。</div>
   </div>
   <div class="card"><h3 style="margin-top:0">已下載的離線地圖</h3><div id="map-regions"><span class="muted small">尚未下載。把想去的區域移到地圖中央，按 ⬇ 下載。</span></div></div>
@@ -1135,6 +1135,43 @@ function endDraw(saveIt){
       save();toast('自訂路線已儲存（'+km+' km）');}
   }
   drawMode=null;updDrawBtn();renderDayRoute();
+}
+function thinPts(pts,max){
+  if(pts.length<=max)return pts;
+  const step=Math.ceil(pts.length/max),out=[];
+  for(let i=0;i<pts.length;i+=step)out.push(pts[i]);
+  const last=pts[pts.length-1];
+  if(out[out.length-1][0]!==last[0]||out[out.length-1][1]!==last[1])out.push(last);
+  return out;
+}
+function importGPX(file){
+  const rd=new FileReader();
+  rd.onload=()=>{
+    try{
+      const doc=new DOMParser().parseFromString(rd.result,'text/xml');
+      if(doc.querySelector('parsererror'))throw new Error('parse');
+      let best=[];
+      const trks=[...doc.querySelectorAll('trk')];
+      if(trks.length){
+        trks.forEach(t=>{
+          const pts=[...t.querySelectorAll('trkpt')].map(p=>[parseFloat(p.getAttribute('lat')),parseFloat(p.getAttribute('lon'))]).filter(p=>isFinite(p[0])&&isFinite(p[1]));
+          if(pts.length>best.length)best=pts;
+        });
+      }else{
+        best=[...doc.querySelectorAll('rtept')].map(p=>[parseFloat(p.getAttribute('lat')),parseFloat(p.getAttribute('lon'))]).filter(p=>isFinite(p[0])&&isFinite(p[1]));
+      }
+      if(best.length<2){toast('GPX 裡沒有找到軌跡點');return;}
+      const pts=thinPts(best,500);
+      const km=Math.round(polylineKm(pts)*10)/10;
+      if(!S.customRoutes)S.customRoutes={};
+      S.customRoutes[S.activeTrip+':'+S.activeDay]={pts:pts,km:km};
+      save();
+      const sf=$('#map-showfull');if(sf&&sf.checked)sf.checked=false;
+      renderDayRoute();
+      toast('已匯入 '+pts.length+' 點，'+km+' km');
+    }catch(e){toast('GPX 解析失敗');}
+  };
+  rd.readAsText(file);
 }
 function updDrawBtn(){
   const b=$('#map-draw');if(!b)return;
@@ -1629,6 +1666,15 @@ function bind(){
   $('#dd-add-after').onclick=async()=>{const p=await addDay(S.activeTrip,S.activeDay);if(p)openDay(S.activeTrip,p);};
   $('#dd-del-day').onclick=()=>deleteDay(S.activeTrip,S.activeDay);
   $('#map-draw').onclick=startDraw;
+  $('#map-gpx').onclick=()=>{
+    if(!S.activeTrip){toast('請先選行程');return;}
+    $('#gpx-file').click();
+  };
+  $('#gpx-file').onchange=e=>{
+    const f=e.target.files[0];
+    if(f)importGPX(f);
+    e.target.value='';
+  };
   $('#map-draw-del').onclick=()=>confirmDlg('刪除這天的自訂路線？會恢復顯示原本的規劃路線。',()=>{delete S.customRoutes[S.activeTrip+':'+S.activeDay];save();updDrawBtn();renderDayRoute();});
   $('#draw-undo').onclick=()=>{if(drawMode){drawMode.pts.pop();updDrawUI();}};
   $('#draw-clear').onclick=()=>{if(drawMode){drawMode.pts=[];updDrawUI();}};
