@@ -817,6 +817,7 @@ select.rowsel{flex:1;}
       <div class="row" style="margin-top:6px"><button class="btn" id="draw-undo">↩ 復原</button><button class="btn" id="draw-clear">清除</button><span style="flex:1"></span><button class="btn btn-primary" id="draw-done">✓ 完成</button></div>
     </div>
   </div>
+  <div class="card" id="map-elev-card" hidden style="margin-top:10px"><h3 style="margin-top:0">⛰ 高度剖面</h3><div id="map-elev" style="position:relative"></div></div>
   <div class="card" style="margin-top:10px">
     <div class="row"><select id="map-trip" class="rowsel"></select><select id="map-day" class="rowsel"></select></div>
     <div class="row" style="margin-top:6px"><label class="small" style="display:flex;align-items:center;gap:6px"><input type="checkbox" id="map-showroute" checked> 本日路線</label><label class="small" style="display:flex;align-items:center;gap:6px;margin-left:10px"><input type="checkbox" id="map-showfull"> 全程路線</label><span style="flex:1"></span><button class="btn-ghost" id="map-navday">🧭 導航</button><button class="btn-ghost" id="map-dlday">⬇ 離線下載</button></div>
@@ -1228,6 +1229,7 @@ function renderDayRoute(){
     routeLayer=L.layerGroup().addTo(map);
     renderFullTrip();
     updDrawBtn();
+    renderMapElevProfile();
     return;
   }
   const cb=$('#map-showroute');
@@ -1263,6 +1265,7 @@ function renderDayRoute(){
   }
   if(bounds.length)map.fitBounds(bounds,{padding:[40,40]});
   updDrawBtn();
+  renderMapElevProfile();
 }
 function startRec(){
   if(!navigator.geolocation){toast('此裝置不支援定位');return;}
@@ -1531,21 +1534,15 @@ function getProfilePts(){
   }
   return null;
 }
-function renderElevProfile(){
-  const card=$('#dd-elev-card'),el=$('#dd-elev');
-  if(!card||!el||$('#day-detail-page').hidden)return;
-  const pts=getProfilePts();
-  if(!pts){card.hidden=true;return;}
-  card.hidden=false;
+function elevProfileHTML(pts,uid){
   const n=pts.length,cum=[0];
-  for(let i=1;i<n;i++)cum.push(cum[i-1]+havKm(pts[i-1],pts[i]));
+  for(let i=1;i<n;i++)cum.push(cum[i-1]+havKm(pts[i-1][0],pts[i-1][1],pts[i][0],pts[i][1]));
   const eles=pts.map(p=>p[2]);
   let minE=Math.min.apply(null,eles),maxE=Math.max.apply(null,eles);
   if(maxE-minE<10){minE-=5;maxE+=5;}
   const totalD=cum[n-1],W=340,H=130,pl=6,pr=6,pt=10,pb=18;
   const X=d=>pl+(d/totalD)*(W-pl-pr);
   const Y=e=>pt+(1-(e-minE)/(maxE-minE))*(H-pt-pb);
-  // simplify for path (max ~200 points)
   const step=Math.max(1,Math.floor(n/200));
   let dAttr='',first=true;
   for(let i=0;i<n;i+=step){
@@ -1554,43 +1551,74 @@ function renderElevProfile(){
   }
   dAttr+='L'+X(cum[n-1]).toFixed(1)+','+Y(eles[n-1]).toFixed(1);
   const area=dAttr+('L'+X(totalD).toFixed(1)+','+(H-pb)+'L'+pl+','+(H-pb)+'Z');
-  el.innerHTML='<svg id="elev-svg" viewBox="0 0 '+W+' '+H+'" style="width:100%;display:block;touch-action:none">'
+  return {html:'<svg id="elev-svg-'+uid+'" viewBox="0 0 '+W+' '+H+'" style="width:100%;display:block;touch-action:none">'
     +'<path d="'+area+'" fill="rgba(13,148,136,0.18)"/>'
     +'<path d="'+dAttr+'" fill="none" stroke="#0d9488" stroke-width="2"/>'
-    +'<line id="elev-line" x1="0" x2="0" y1="'+pt+'" y2="'+(H-pb)+'" stroke="#333" stroke-width="1" style="display:none"/>'
-    +'<circle id="elev-dot" r="4" fill="#0d9488" stroke="#fff" stroke-width="1.5" style="display:none"/>'
+    +'<line id="elev-line-'+uid+'" x1="0" x2="0" y1="'+pt+'" y2="'+(H-pb)+'" stroke="#333" stroke-width="1" style="display:none"/>'
+    +'<circle id="elev-dot-'+uid+'" r="4" fill="#0d9488" stroke="#fff" stroke-width="1.5" style="display:none"/>'
     +'<text x="'+pl+'" y="'+(H-4)+'" font-size="10" fill="#888">0</text>'
     +'<text x="'+(W-pr-30)+'" y="'+(H-4)+'" font-size="10" fill="#888">'+totalD.toFixed(1)+' km</text>'
     +'<text x="'+pl+'" y="'+(pt-2)+'" font-size="10" fill="#888">'+Math.round(maxE)+'m</text>'
-    +'<rect id="elev-hit" x="0" y="0" width="'+W+'" height="'+H+'" fill="transparent"/>'
-    +'</svg><div id="elev-tip" style="display:none;position:absolute;background:#222;color:#fff;font-size:12px;padding:6px 9px;border-radius:8px;pointer-events:none;white-space:nowrap;z-index:5"></div>';
-  const svg=$('#elev-svg'),tip=$('#elev-tip'),line=$('#elev-line'),dot=$('#elev-dot');
+    +'<rect id="elev-hit-'+uid+'" x="0" y="0" width="'+W+'" height="'+H+'" fill="transparent"/>'
+    +'</svg><div id="elev-tip-'+uid+'" style="display:none;position:absolute;background:#222;color:#fff;font-size:12px;padding:6px 9px;border-radius:8px;pointer-events:none;white-space:nowrap;z-index:5"></div>',
+    cum:cum,eles:eles,totalD:totalD,W:W,H:H,pt:pt,pb:pb,pl:pl,pr:pr,X:X,Y:Y};
+}
+function bindElevProfile(uid,data,pts,onMove){
+  const svg=$('#elev-svg-'+uid),tip=$('#elev-tip-'+uid),line=$('#elev-line-'+uid),dot=$('#elev-dot-'+uid);
+  if(!svg)return;
+  const n=pts.length,cum=data.cum,eles=data.eles;
   const showAt=(clientX)=>{
     const r=svg.getBoundingClientRect();
-    const sx=(clientX-r.left)/r.width*W;
-    const d=Math.min(totalD,Math.max(0,(sx-pl)/(W-pl-pr)*totalD));
-    // binary search closest
+    const sx=(clientX-r.left)/r.width*data.W;
+    const d=Math.min(data.totalD,Math.max(0,(sx-data.pl)/(data.W-data.pl-data.pr)*data.totalD));
     let lo=0,hi=n-1;
     while(lo<hi){const mid=(lo+hi)>>1;if(cum[mid]<d)lo=mid+1;else hi=mid;}
     const i=lo>0&&Math.abs(cum[lo-1]-d)<Math.abs(cum[lo]-d)?lo-1:lo;
     const e=eles[i],dd=cum[i];
     let grade=null;
     if(i>0&&cum[i]>cum[i-1])grade=(eles[i]-eles[i-1])/(cum[i]-cum[i-1])/10;
-    const gx=X(dd),gy=Y(e);
+    const gx=data.X(dd),gy=data.Y(e);
     line.setAttribute('x1',gx);line.setAttribute('x2',gx);line.style.display='';
     dot.setAttribute('cx',gx);dot.setAttribute('cy',gy);dot.style.display='';
     tip.innerHTML='距離 '+dd.toFixed(1)+' km<br>海拔 '+Math.round(e)+' m'+(grade!=null?'<br>坡度 '+(grade>=0?'+':'')+grade.toFixed(0)+'%':'');
     tip.style.display='block';
     const tw=tip.offsetWidth;
-    tip.style.left=Math.min(r.width-tw-4,Math.max(4,(gx/W)*r.width-tw/2))+'px';
-    tip.style.top=Math.max(2,(gy/H)*r.height-56)+'px';
+    tip.style.left=Math.min(r.width-tw-4,Math.max(4,(gx/data.W)*r.width-tw/2))+'px';
+    tip.style.top=Math.max(2,(gy/data.H)*r.height-56)+'px';
+    if(onMove)onMove(pts[i]);
   };
-  const hide=()=>{tip.style.display='none';line.style.display='none';dot.style.display='none';};
-  const hit=$('#elev-hit');
+  const hide=()=>{tip.style.display='none';line.style.display='none';dot.style.display='none';if(onMove)onMove(null);};
+  const hit=$('#elev-hit-'+uid);
   hit.addEventListener('pointerdown',ev=>{hit.setPointerCapture(ev.pointerId);showAt(ev.clientX);});
   hit.addEventListener('pointermove',ev=>{if(ev.pressure>0||ev.pointerType==='mouse')showAt(ev.clientX);});
   hit.addEventListener('pointerup',hide);
   hit.addEventListener('pointercancel',hide);
+}
+function renderElevProfile(){
+  const card=$('#dd-elev-card'),el=$('#dd-elev');
+  if(!card||!el||$('#day-detail-page').hidden)return;
+  const pts=getProfilePts();
+  if(!pts){card.hidden=true;return;}
+  card.hidden=false;
+  const data=elevProfileHTML(pts,'dd');
+  el.innerHTML=data.html;
+  bindElevProfile('dd',data,pts,null);
+}
+let elevMapMarker=null;
+function renderMapElevProfile(){
+  const card=$('#map-elev-card'),el=$('#map-elev');
+  if(!card||!el)return;
+  const pts=getProfilePts();
+  if(!pts){card.hidden=true;return;}
+  card.hidden=false;
+  const data=elevProfileHTML(pts,'map');
+  el.innerHTML=data.html;
+  bindElevProfile('map',data,pts,(pt)=>{
+    if(elevMapMarker){map.removeLayer(elevMapMarker);elevMapMarker=null;}
+    if(pt&&map){
+      elevMapMarker=L.circleMarker([pt[0],pt[1]],{radius:7,color:'#fff',weight:2,fillColor:'#2563eb',fillOpacity:1}).addTo(map);
+    }
+  });
 }
 function statsModal(){
   const d=daysOf(S.activeTrip)[S.activeDay-1],s=d.stats||{};
