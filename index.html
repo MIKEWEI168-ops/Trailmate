@@ -892,9 +892,7 @@ const KEPLER_STATS = [{"km": 14.3, "up": 911, "down": 86, "hrs": "5–6", "tmin"
 const KEPLER_NOTES = ["14.3km・爬升911m・下降86m・約5–6小時", "14.1km・爬升693m・下降1270m・約5–6小時", "15.7km・爬升224m・下降505m・約5–6小時", "18.8km・爬升243m・下降220m・約5–6小時"];
 const EXTRA_TRIPS = [
   {id:'trip-camino', name:'西班牙朝聖北方之路 31 天', start:'2027-05-01', cur:'EUR', tk:'CAMINO_TITLES', st:'CAMINO_STATS',
-   stay:{9:{name:'Albergue La Caba\u00f1a del Abuelo, G\u00fcemes',code:'',status:''},
-         22:{name:'Luarca（港口飯店，待定）',code:'',status:''},
-         25:{name:'Vilanova de Lourenz\u00e1',code:'',status:''}}},
+   stay:{1:{name:'A Room in the City（建議）',code:'',status:''},2:{name:'Blai Blai Hostel（建議）',code:'',status:''},3:{name:'Albergue de Peregrinos de Deba（建議）',code:'',status:''},4:{name:'Albergue Intxauspe（建議）',code:'',status:''},5:{name:'Albergue Juvenil de Gernika（建議）',code:'',status:''},6:{name:'Albergue de Bilbao（建議）',code:'',status:''},7:{name:'Albergue de Peregrinos de Castro Urdiales（建議）',code:'',status:''},8:{name:'Albergue Casa de la Trinidad（建議）',code:'',status:''},9:{name:'Albergue La Caba\u00f1a del Abuelo, G\u00fcemes',code:'',status:''},10:{name:'Albergue de Peregrinos de Santander（建議）',code:'',status:''},11:{name:'Albergue El Convento（建議）',code:'',status:''},12:{name:'Albergue La Huella del Camino（建議）',code:'',status:''},13:{name:'Albergue Casa de Peregrinos Colombres（建議）',code:'',status:''},14:{name:'Albergue La Estaci\u00f3n（建議）',code:'',status:''},15:{name:'Albergue Juvenil Ribadesella（建議）',code:'',status:''},16:{name:'Albergue de Peregrinos de La Isla（建議）',code:'',status:''},17:{name:'Albergue Villaviciosa（建議）',code:'',status:''},18:{name:'Albergue de Peregrinos de Gij\u00f3n（建議）',code:'',status:''},19:{name:'Casa Carmina Hostel（建議）',code:'',status:''},20:{name:'Albergue de Peregrinos Soto de Lui\u00f1a（建議）',code:'',status:''},21:{name:'Albergue de Peregrinos de Cadavedo（建議）',code:'',status:''},22:{name:'Luarca（港口飯店，待定）',code:'',status:''},23:{name:'Albergue de Peregrinos de La Caridad（建議）',code:'',status:''},24:{name:'Albergue de Peregrinos de Ribadeo（建議）',code:'',status:''},25:{name:'Vilanova de Lourenz\u00e1',code:'',status:''},26:{name:'Albergue Xabarin de Abad\u00edn（建議）',code:'',status:''},27:{name:'Albergue Tur\u00edstico Castelos（建議）',code:'',status:''},28:{name:'Albergue de Peregrinos de Baamonde（建議）',code:'',status:''},29:{name:'Albergue San Mart\u00edn de Miraz（建議）',code:'',status:''},30:{name:'Albergue del Monasterio de Sobrado（建議）',code:'',status:''},31:{name:'Albergue de Peregrinos de Arz\u00faa（建議）',code:'',status:''}}},
   {id:'trip-kyushu', name:'九州 12 天自由行', start:'2026-10-01', cur:'JPY', tk:'KYUSHU_TITLES', st:'KYUSHU_STATS', stay:{}},
   {id:'trip-kepler', name:'紐西蘭 Kepler Track 4 天', start:'2026-12-01', cur:'NZD', tk:'KEPLER_TITLES', nk:'KEPLER_NOTES', st:'KEPLER_STATS',
    stay:{1:{name:'Luxmore Hut',code:'',status:''},
@@ -914,6 +912,9 @@ function seedExtraTrips(S){
         S.days[et.id].forEach(function(d,j){if(!d.stats&&stArr[j]){d.stats=stArr[j];pf=true;}});
         if(pf)changed=true;
       }
+      // backfill stay for existing users (only blank names; never overwrite user entries)
+      if(!S.stay)S.stay={};
+      if(et.stay){var bqf=false;for(var bqn in et.stay){var bqk=et.id+':'+bqn,bqv=S.stay[bqk];if(!bqv||!bqv.name){S.stay[bqk]=et.stay[bqn];bqf=true;}}if(bqf)changed=true;}
       continue;
     }
     var titles = TL[et.tk]||[];
