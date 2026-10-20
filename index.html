@@ -834,9 +834,9 @@ select.rowsel{flex:1;}
   <div class="card"><h3 style="margin-top:0">照片</h3><div id="di-photos" class="photo-grid"></div>
     <label class="btn">＋ 新增照片<input type="file" id="di-file" accept="image/*" multiple hidden></label></div>
   <div class="card"><h3 style="margin-top:0">評分</h3>
-    <div class="row" style="margin-bottom:6px"><span style="flex:0 0 52px">今日</span><span class="stars" id="st-day"></span></div>
-    <div class="row" style="margin-bottom:6px"><span style="flex:0 0 52px">住宿</span><span class="stars" id="st-stay"></span></div>
-    <div class="row"><span style="flex:0 0 52px">餐廳</span><span class="stars" id="st-food"></span></div></div>
+    <div class="row" style="margin-bottom:6px"><span style="flex:0 0 52px">今日</span><span class="stars" id="st-day"><span data-s="1">★</span><span data-s="2">★</span><span data-s="3">★</span><span data-s="4">★</span><span data-s="5">★</span></span></div>
+    <div class="row" style="margin-bottom:6px"><span style="flex:0 0 52px">住宿</span><span class="stars" id="st-stay"><span data-s="1">★</span><span data-s="2">★</span><span data-s="3">★</span><span data-s="4">★</span><span data-s="5">★</span></span></div>
+    <div class="row"><span style="flex:0 0 52px">餐廳</span><span class="stars" id="st-food"><span data-s="1">★</span><span data-s="2">★</span><span data-s="3">★</span><span data-s="4">★</span><span data-s="5">★</span></span></div></div>
 </section>
 <section class="view" id="view-more">
   <div class="card"><h3 style="margin-top:0">儲存空間</h3><div id="st-info" class="muted small">計算中…</div>
@@ -1689,9 +1689,15 @@ function renderDiary(){
 }
 function renderStars(el,val,cb){
   if(!el)return;
-  el.innerHTML=[1,2,3,4,5].map(i=>'<span data-s="'+i+'" class="'+(i<=val?'on':'')+'">★</span>').join('');
-  el.querySelectorAll('span').forEach(s=>{
-    s.onclick=()=>{const v=+s.getAttribute('data-s');cb(v===val?0:v);};
+  let spans=el.querySelectorAll('span');
+  if(!spans.length){
+    el.innerHTML=[1,2,3,4,5].map(i=>'<span data-s="'+i+'">★</span>').join('');
+    spans=el.querySelectorAll('span');
+  }
+  spans.forEach(s=>{
+    const v=+s.getAttribute('data-s');
+    s.classList.toggle('on',v<=val);
+    s.onclick=()=>cb(v===val?0:v);
   });
 }
 async function renderPhotos(di){
