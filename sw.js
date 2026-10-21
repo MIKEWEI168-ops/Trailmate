@@ -1,5 +1,5 @@
 /* TrailMate service worker — 快取 App 本體，離線也能開 */
-const CACHE = 'trailmate-v36';
+const CACHE = 'trailmate-v37';
 const ASSETS = [
   './',
   './index.html',
