@@ -741,6 +741,14 @@ nav.tabs .ic{font-size:22px;display:block;line-height:1.2;}
 .stars{font-size:22px;letter-spacing:2px;}
 .stars span{cursor:pointer;color:#9ca3af;padding:4px 2px;touch-action:manipulation;-webkit-tap-highlight-color:transparent;display:inline-block;min-width:28px;text-align:center;}
 .stars span.on{color:var(--star);}
+.itin-list{position:relative;}
+.itin-list::before{content:'';position:absolute;left:12px;top:14px;bottom:14px;width:2px;background:#e5e7eb;}
+.itin-stop{display:flex;gap:10px;align-items:flex-start;position:relative;padding:7px 0;cursor:pointer;}
+.itin-stop.ro{cursor:default;}
+.itin-badge{flex:0 0 26px;width:26px;height:26px;border-radius:50%;background:#dc2626;color:#fff;font-weight:700;font-size:14px;display:flex;align-items:center;justify-content:center;z-index:1;}
+.itin-time{color:#dc2626;font-weight:700;font-size:13px;}
+.itin-name{font-weight:700;}
+.itin-seg{margin-left:36px;padding:1px 0 5px;color:#6b7280;font-size:13px;}
 #toast{position:fixed;left:50%;bottom:calc(80px + env(safe-area-inset-bottom));transform:translateX(-50%) translateY(20px);background:#1c1c1e;color:#fff;padding:10px 18px;border-radius:999px;font-size:14px;opacity:0;transition:all .25s;z-index:900;pointer-events:none;max-width:90vw;text-align:center;}
 #toast.show{opacity:1;transform:translateX(-50%) translateY(0);}
 .prog{height:8px;background:var(--border);border-radius:99px;overflow:hidden;margin:8px 0;}
@@ -773,6 +781,7 @@ select.rowsel{flex:1;}
       <label class="lbl">備註（交通／住宿）</label><textarea id="dd-note" rows="3"></textarea>
       <div class="row" style="margin-top:10px"><button class="btn btn-primary" id="dd-goto-diary">寫日記 →</button></div>
     </div>
+    <div class="card"><h3 style="margin-top:0">🗓 本日行程</h3><div id="dd-itin" class="itin-list"></div></div>
     <div class="card" id="dd-stats-card" hidden><div id="dd-stats"></div></div>
     <div class="card" id="dd-elev-card" hidden><h3 style="margin-top:0">⛰ 高度剖面</h3><div id="dd-elev" style="position:relative"></div></div>
     <div class="card"><h3 style="margin-top:0">本日軌跡</h3><div id="dd-tracks"><span class="muted small">尚無軌跡</span></div></div>
@@ -967,6 +976,7 @@ function seed(){
 let S=null;
 function load(){try{const r=localStorage.getItem(LS);if(r){S=JSON.parse(r);if(!S.expenses)S.expenses={};
   if(!S.customRoutes)S.customRoutes={};
+  if(!S.itin)S.itin={};
   if(!S.stay){S.stay={};if(S.trips.some(t=>t.id==='trip-dolomites'))DOLOMITES.forEach((t,i)=>{S.stay['trip-dolomites:'+(i+1)]={name:t,code:'',status:''};});save();}
   if(typeof seedExtraTrips!=='undefined'&&seedExtraTrips(S))save();
   if(typeof DOLO_STATS!=='undefined'&&S.days['trip-dolomites']&&S.days['trip-dolomites'].length===DOLO_STATS.length){
@@ -1420,7 +1430,7 @@ async function addDay(tid,afterN){
   const pos=afterN?afterN+1:days.length+1;
   const prevD=days[pos-2],nd=new Date(prevD.date+'T12:00:00');nd.setDate(nd.getDate()+1);
   keyShift([S.diary],dkey,tid,pos,+1,days.length);
-  keyShift([S.expenses,S.stay,S.customRoutes],(t,n)=>t+':'+n,tid,pos,+1,days.length);
+  keyShift([S.expenses,S.stay,S.customRoutes,S.itin||{}],(t,n)=>t+':'+n,tid,pos,+1,days.length);
   days.splice(pos-1,0,{n:pos,date:iso(nd),title:'',note:'',stats:null});
   for(let i=pos;i<days.length;i++){const dd=new Date(days[i].date+'T12:00:00');dd.setDate(dd.getDate()+1);days[i].date=iso(dd);}
   days.forEach((d,i)=>d.n=i+1);
@@ -1432,7 +1442,7 @@ function deleteDay(tid,n){
   if(days.length<=1){toast('行程至少要保留一天');return;}
   confirmDlg('刪除 D'+n+'（'+fmtMD(days[n-1].date)+'）？這天的日記、軌跡、支出、住宿、自訂路線都會一起刪除。',async()=>{
     keyShift([S.diary],dkey,tid,n,-1,days.length);
-    keyShift([S.expenses,S.stay,S.customRoutes],(t,x)=>t+':'+x,tid,n,-1,days.length);
+    keyShift([S.expenses,S.stay,S.customRoutes,S.itin||{}],(t,x)=>t+':'+x,tid,n,-1,days.length);
     days.splice(n-1,1);
     for(let i=n-1;i<days.length;i++){const dd=new Date(days[i].date+'T12:00:00');dd.setDate(dd.getDate()-1);days[i].date=iso(dd);}
     days.forEach((d,i)=>d.n=i+1);
@@ -1651,13 +1661,83 @@ function statsModal(){
     save();closeModal();renderDayStats();toast('已更新');
   };
 }
+/* ============ day itinerary (ChicTrip-style timeline) ============ */
+function itinKey(){return S.activeTrip+':'+S.activeDay;}
+function segInfo(tr,i){
+  if(!tr||!tr.routes)return null;
+  for(const r of tr.routes){
+    const v=r.via||[];
+    for(let k=0;k<v.length-1;k++){
+      if(v[k]===i&&v[k+1]===i+1){
+        let mode='🚶 步行';
+        if(r.c==='#2563eb')mode='🚌 交通';
+        else if(r.c==='#7c3aed')mode='🚡 纜車';
+        return {mode:mode,km:(r.km&&v.length===2)?r.km:null};
+      }
+    }
+  }
+  return null;
+}
+function renderDayItin(){
+  const el=$('#dd-itin');
+  if(!el||$('#day-detail-page').hidden)return;
+  const tid=S.activeTrip,n=S.activeDay,key=tid+':'+n;
+  const custom=(S.itin||{})[key];
+  const tr=trailsFor(tid);const dayTr=tr?tr[n-1]:null;
+  let stops=null,builtin=false;
+  if(custom)stops=custom;
+  else if(dayTr&&dayTr.stops&&dayTr.stops.length){stops=dayTr.stops.map(s=>({name:s[0],time:'',note:s[3]||''}));builtin=true;}
+  let h='';
+  if(!stops||!stops.length){
+    h='<div class="muted small">尚無站點</div><button class="btn" id="itin-add" style="width:100%;margin-top:8px">＋ 新增站點</button>';
+  }else{
+    h=stops.map((s,i)=>{
+      let seg='';
+      if(i<stops.length-1&&builtin){
+        const si=segInfo(dayTr,i);
+        seg='<div class="itin-seg">'+(si?si.mode+(si.km?' ・ '+si.km+' km':''):'🚶 步行')+'</div>';
+      }
+      return '<div class="itin-stop'+(builtin?' ro':'')+'"'+(builtin?'':' data-itin="'+i+'"')+'><div class="itin-badge">'+(i+1)+'</div><div>'
+        +(s.time?'<div class="itin-time">'+esc(s.time)+'</div>':'')
+        +'<div class="itin-name">'+esc(s.name)+'</div>'
+        +(s.note?'<div class="muted small">'+esc(s.note)+'</div>':'')
+        +'</div></div>'+seg;
+    }).join('');
+    if(builtin)h+='<button class="btn" id="itin-customize" style="width:100%;margin-top:8px">✏️ 改成自訂站點（可增刪／加時間）</button>';
+    else h+='<div class="muted small" style="margin-top:2px">點站點可編輯</div><button class="btn" id="itin-add" style="width:100%;margin-top:6px">＋ 新增站點</button>'
+      +(dayTr&&dayTr.stops&&dayTr.stops.length?'<button class="btn-ghost" id="itin-restore" style="width:100%;margin-top:2px">恢復內建站點</button>':'');
+  }
+  el.innerHTML=h;
+  if($('#itin-add'))$('#itin-add').onclick=()=>itinStopModal(-1);
+  if($('#itin-customize'))$('#itin-customize').onclick=()=>{if(!S.itin)S.itin={};S.itin[key]=stops.map(s=>({name:s.name,time:'',note:s.note}));save();renderDayItin();toast('已複製成自訂站點');};
+  if($('#itin-restore'))$('#itin-restore').onclick=()=>confirmDlg('恢復內建站點？你改過的自訂站點會被刪除。',()=>{delete S.itin[key];save();renderDayItin();});
+  el.querySelectorAll('[data-itin]').forEach(x=>x.onclick=()=>itinStopModal(+x.getAttribute('data-itin')));
+}
+function itinStopModal(idx){
+  const key=itinKey();if(!S.itin)S.itin={};
+  const arr=S.itin[key]||[];
+  const s=idx>=0?arr[idx]:{name:'',time:'',note:''};
+  openModal('<h3 style="margin-top:0">'+(idx>=0?'編輯站點':'新增站點')+'</h3>'
+  +'<label class="lbl">名稱</label><input id="is-name" value="'+esc(s.name||'')+'" placeholder="例如：Zarautz">'
+  +'<label class="lbl">時間（選填）</label><input id="is-time" value="'+esc(s.time||'')+'" placeholder="例如：08:00">'
+  +'<label class="lbl">備註（選填）</label><input id="is-note" value="'+esc(s.note||'')+'" placeholder="例如：停留 1 小時">'
+  +'<div class="row" style="margin-top:12px">'+(idx>=0?'<button class="btn btn-danger" id="is-del">刪除</button>':'')+'<span style="flex:1"></span><button class="btn" id="is-no">取消</button><button class="btn btn-primary" id="is-ok">儲存</button></div>');
+  $('#is-no').onclick=closeModal;
+  if(idx>=0)$('#is-del').onclick=()=>{arr.splice(idx,1);S.itin[key]=arr;save();closeModal();renderDayItin();};
+  $('#is-ok').onclick=()=>{
+    const name=$('#is-name').value.trim();if(!name){toast('請輸入名稱');return;}
+    const item={name:name,time:$('#is-time').value.trim(),note:$('#is-note').value.trim()};
+    if(idx>=0)arr[idx]=item;else arr.push(item);
+    S.itin[key]=arr;save();closeModal();renderDayItin();
+  };
+}
 function openDay(tid,n){
   curDayTrip=tid;S.activeTrip=tid;S.activeDay=n;save();ensureTripDay();
   const d=daysOf(tid)[n-1];
   $('#dd-h').textContent='D'+n+' '+d.title;
   $('#dd-date').textContent=d.date+'（'+'日一二三四五六'[new Date(d.date+'T12:00').getDay()]+'）';
   $('#dd-title').value=d.title;$('#dd-note').value=d.note||'';
-  showTripsPage('day-detail-page');renderDayStats();renderElevProfile();renderDayTracks();renderExpenses();renderStay();
+  showTripsPage('day-detail-page');renderDayStats();renderDayItin();renderElevProfile();renderDayTracks();renderExpenses();renderStay();
 }
 function newTripModal(){
   openModal('<h3 style="margin-top:0">新增行程</h3><label class="lbl">名稱</label><input id="nt-name" placeholder="例如：朝聖之路 31 天">'
@@ -1748,7 +1828,7 @@ async function storageInfo(){
 }
 async function exportJSON(){
   const tracks=[];for(const k of await idbKeys('tracks')){const tr=await idbGet('tracks',k);if(tr)tracks.push(tr);}
-  const data={app:'TrailMate',version:1,exportedAt:new Date().toISOString(),state:{trips:S.trips,days:S.days,diary:S.diary,regions:S.regions,expenses:S.expenses||{},stay:S.stay||{},activeTrip:S.activeTrip,activeDay:S.activeDay},tracks:tracks,note:'不含照片與離線圖資'};
+  const data={app:'TrailMate',version:1,exportedAt:new Date().toISOString(),state:{trips:S.trips,days:S.days,diary:S.diary,regions:S.regions,expenses:S.expenses||{},stay:S.stay||{},itin:S.itin||{},customRoutes:S.customRoutes||{},activeTrip:S.activeTrip,activeDay:S.activeDay},tracks:tracks,note:'不含照片與離線圖資'};
   dl('trailmate-backup-'+iso(new Date())+'.json',new Blob([JSON.stringify(data)],{type:'application/json'}));
   toast('備份已匯出');
 }
@@ -1757,7 +1837,7 @@ function importJSON(file){
   r.onload=()=>{try{const d=JSON.parse(r.result);
     if(!d.state||!d.state.trips)throw 0;
     confirmDlg('匯入會覆蓋目前所有行程與日記文字，確定？',async()=>{
-      S.trips=d.state.trips;S.days=d.state.days||{};S.diary=d.state.diary||{};S.regions=d.state.regions||[];S.expenses=d.state.expenses||{};S.stay=d.state.stay||{};
+      S.trips=d.state.trips;S.days=d.state.days||{};S.diary=d.state.diary||{};S.regions=d.state.regions||[];S.expenses=d.state.expenses||{};S.stay=d.state.stay||{};S.itin=d.state.itin||{};if(d.state.customRoutes)S.customRoutes=d.state.customRoutes;
       S.activeTrip=d.state.activeTrip;S.activeDay=d.state.activeDay||1;
       if(d.tracks&&d.tracks.length){for(const tr of d.tracks){await idbPut('tracks',tr.id||uid(),tr);}}
       save();ensureTripDay();renderTrips();renderDiary();renderRegions();showTripsPage('trips-list-page');
