@@ -845,7 +845,7 @@ select.rowsel{flex:1;}
   <div class="card"><h3 style="margin-top:0">短片</h3>
     <div class="row"><button class="btn" id="btn-reel-day">🎬 本日短片</button><button class="btn" id="btn-reel-trip">🎬 全程短片</button></div>
     <div class="row" style="margin-top:8px"><label class="btn">🎵 設定音樂<input type="file" id="reel-music-file" accept="audio/*" hidden></label><span class="muted small" id="reel-music-name"></span></div>
-    <div class="muted small" style="margin-top:6px">用日記照片自動生成直式短片（每張 2.8 秒＋淡入淡出）。生成需保持畫面開啟，約與短片等長。</div></div>
+    <div class="muted small" style="margin-top:6px">用日記照片自動生成直式短片（每張 2.8 秒＋淡入淡出）。照片以完整畫面呈現，不裁切；橫式照片上下會有黑邊。生成需保持畫面開啟，約與短片等長。</div></div>
   <div class="card"><h3 style="margin-top:0">評分</h3>
     <div class="row" style="margin-bottom:6px"><span style="flex:0 0 52px">今日</span><span class="stars" id="st-day"><span data-s="1">★</span><span data-s="2">★</span><span data-s="3">★</span><span data-s="4">★</span><span data-s="5">★</span></span></div>
     <div class="row" style="margin-bottom:6px"><span style="flex:0 0 52px">住宿</span><span class="stars" id="st-stay"><span data-s="1">★</span><span data-s="2">★</span><span data-s="3">★</span><span data-s="4">★</span><span data-s="5">★</span></span></div>
@@ -1875,7 +1875,7 @@ let reelBusy=false,reelCancel=false;
 async function reelMusicGet(){try{return await idbGet('music','default');}catch(_){return null;}}
 async function renderReelMusicStatus(){const el=$('#reel-music-name');if(!el)return;const b=await reelMusicGet();el.textContent=b?('目前音樂：'+(b.name||'自訂音樂')):'尚未設定音樂（短片將無聲）';}
 function reelLoadImg(blob){return new Promise((res,rej)=>{const u=URL.createObjectURL(blob);const im=new Image();im.onload=()=>res({im:im,u:u});im.onerror=()=>{URL.revokeObjectURL(u);rej(new Error('照片讀取失敗'));};im.src=u;});}
-function reelDrawCover(ctx,im){const s=Math.max(REEL_W/im.width,REEL_H/im.height);const w=im.width*s,h=im.height*s;ctx.drawImage(im,(REEL_W-w)/2,(REEL_H-h)/2,w,h);}
+function reelDrawFit(ctx,im){ctx.fillStyle='#000';ctx.fillRect(0,0,REEL_W,REEL_H);const s=Math.min(REEL_W/im.width,REEL_H/im.height);const w=im.width*s,h=im.height*s;ctx.drawImage(im,(REEL_W-w)/2,(REEL_H-h)/2,w,h);}
 function reelFitFont(ctx,text,maxW,weight,px){let p=px;ctx.font=weight+' '+p+'px system-ui,sans-serif';while(p>28&&ctx.measureText(text).width>maxW){p-=6;ctx.font=weight+' '+p+'px system-ui,sans-serif';}return p;}
 async function makeReel(scope){
   if(reelBusy)return;
@@ -1921,8 +1921,8 @@ async function makeReel(scope){
     function drawFrame(el){
       if(el<imgs.length*REEL_DUR){
         const i=Math.min(imgs.length-1,Math.floor(el/REEL_DUR));const lt=el-i*REEL_DUR;
-        reelDrawCover(ctx,imgs[i].im);
-        if(lt>REEL_DUR-REEL_XF&&i+1<imgs.length){ctx.save();ctx.globalAlpha=(lt-(REEL_DUR-REEL_XF))/REEL_XF;reelDrawCover(ctx,imgs[i+1].im);ctx.restore();}
+        reelDrawFit(ctx,imgs[i].im);
+        if(lt>REEL_DUR-REEL_XF&&i+1<imgs.length){ctx.save();ctx.globalAlpha=(lt-(REEL_DUR-REEL_XF))/REEL_XF;reelDrawFit(ctx,imgs[i+1].im);ctx.restore();}
         if(i===0)drawTitle();
       }else{
         ctx.fillStyle='#0b3d3a';ctx.fillRect(0,0,REEL_W,REEL_H);
