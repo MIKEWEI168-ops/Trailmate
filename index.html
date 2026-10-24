@@ -842,6 +842,10 @@ select.rowsel{flex:1;}
     <div class="muted small" id="di-saved"></div></div>
   <div class="card"><h3 style="margin-top:0">照片</h3><div id="di-photos" class="photo-grid"></div>
     <label class="btn">＋ 新增照片<input type="file" id="di-file" accept="image/*" multiple hidden></label></div>
+  <div class="card"><h3 style="margin-top:0">短片</h3>
+    <div class="row"><button class="btn" id="btn-reel-day">🎬 本日短片</button><button class="btn" id="btn-reel-trip">🎬 全程短片</button></div>
+    <div class="row" style="margin-top:8px"><label class="btn">🎵 設定音樂<input type="file" id="reel-music-file" accept="audio/*" hidden></label><span class="muted small" id="reel-music-name"></span></div>
+    <div class="muted small" style="margin-top:6px">用日記照片自動生成直式短片（每張 2.8 秒＋淡入淡出）。生成需保持畫面開啟，約與短片等長。</div></div>
   <div class="card"><h3 style="margin-top:0">評分</h3>
     <div class="row" style="margin-bottom:6px"><span style="flex:0 0 52px">今日</span><span class="stars" id="st-day"><span data-s="1">★</span><span data-s="2">★</span><span data-s="3">★</span><span data-s="4">★</span><span data-s="5">★</span></span></div>
     <div class="row" style="margin-bottom:6px"><span style="flex:0 0 52px">住宿</span><span class="stars" id="st-stay"><span data-s="1">★</span><span data-s="2">★</span><span data-s="3">★</span><span data-s="4">★</span><span data-s="5">★</span></span></div>
@@ -1050,8 +1054,8 @@ function dkey(tid,n){return tid+'_'+n;}
 function diaryOf(tid,n){const k=dkey(tid,n);if(!S.diary[k])S.diary[k]={text:'',day:0,stay:0,photos:[],updated:0};return S.diary[k];}
 /* ============ indexedDB ============ */
 let _db=null;
-function db(){return new Promise((res,rej)=>{if(_db)return res(_db);const r=indexedDB.open('trailmate',1);
-r.onupgradeneeded=e=>{const d=e.target.result;if(!d.objectStoreNames.contains('tiles'))d.createObjectStore('tiles');if(!d.objectStoreNames.contains('photos'))d.createObjectStore('photos');if(!d.objectStoreNames.contains('tracks'))d.createObjectStore('tracks');};
+function db(){return new Promise((res,rej)=>{if(_db)return res(_db);const r=indexedDB.open('trailmate',2);
+r.onupgradeneeded=e=>{const d=e.target.result;if(!d.objectStoreNames.contains('tiles'))d.createObjectStore('tiles');if(!d.objectStoreNames.contains('photos'))d.createObjectStore('photos');if(!d.objectStoreNames.contains('tracks'))d.createObjectStore('tracks');if(!d.objectStoreNames.contains('music'))d.createObjectStore('music');};
 r.onsuccess=e=>{_db=e.target.result;res(_db);};r.onerror=()=>rej(r.error);});}
 async function idbPut(st,k,v){const d=await db();return new Promise((res,rej)=>{const t=d.transaction(st,'readwrite');t.objectStore(st).put(v,k);t.oncomplete=()=>res();t.onerror=()=>rej(t.error);});}
 async function idbGet(st,k){const d=await db();return new Promise((res,rej)=>{const t=d.transaction(st,'readonly');const q=t.objectStore(st).get(k);q.onsuccess=()=>res(q.result);q.onerror=()=>rej(q.error);});}
@@ -1819,6 +1823,7 @@ function renderDiary(){
   renderStars($('#st-stay'),di.stay||0,v=>{di.stay=v;di.updated=Date.now();save();renderStars($('#st-stay'),v);});
   renderStars($('#st-food'),di.food||0,v=>{di.food=v;di.updated=Date.now();save();renderStars($('#st-food'),v);});
   renderPhotos(di);
+  renderReelMusicStatus();
 }
 function renderStars(el,val,cb){
   if(!el)return;
@@ -1863,6 +1868,106 @@ async function addPhotos(files){
   for(const f of files){const b=await downscale(f);if(!b)continue;const pid=uid();await idbPut('photos',pid,b);di.photos.push(pid);n++;}
   di.updated=Date.now();save();renderPhotos(di);
   toast(n?('已加入 '+n+' 張照片'):'照片處理失敗');
+}
+/* ============ reel (v44) ============ */
+const REEL_W=1080,REEL_H=1920,REEL_DUR=2.8,REEL_XF=0.5,REEL_END=2.2;
+let reelBusy=false,reelCancel=false;
+async function reelMusicGet(){try{return await idbGet('music','default');}catch(_){return null;}}
+async function renderReelMusicStatus(){const el=$('#reel-music-name');if(!el)return;const b=await reelMusicGet();el.textContent=b?('目前音樂：'+(b.name||'自訂音樂')):'尚未設定音樂（短片將無聲）';}
+function reelLoadImg(blob){return new Promise((res,rej)=>{const u=URL.createObjectURL(blob);const im=new Image();im.onload=()=>res({im:im,u:u});im.onerror=()=>{URL.revokeObjectURL(u);rej(new Error('照片讀取失敗'));};im.src=u;});}
+function reelDrawCover(ctx,im){const s=Math.max(REEL_W/im.width,REEL_H/im.height);const w=im.width*s,h=im.height*s;ctx.drawImage(im,(REEL_W-w)/2,(REEL_H-h)/2,w,h);}
+function reelFitFont(ctx,text,maxW,weight,px){let p=px;ctx.font=weight+' '+p+'px system-ui,sans-serif';while(p>28&&ctx.measureText(text).width>maxW){p-=6;ctx.font=weight+' '+p+'px system-ui,sans-serif';}return p;}
+async function makeReel(scope){
+  if(reelBusy)return;
+  const t=trip(S.activeTrip);if(!t){toast('請先選行程');return;}
+  const allDays=daysOf(t.id);
+  const dayNums=scope==='day'?[S.activeDay]:allDays.map(d=>d.n);
+  const items=[];
+  for(const n of dayNums){const di=S.diary[dkey(t.id,n)];if(!di||!di.photos||!di.photos.length)continue;const d=allDays[n-1];
+    for(const pid of di.photos){const b=await idbGet('photos',pid).catch(()=>null);if(b)items.push({blob:b,day:n,date:d?d.date:''});}}
+  if(!items.length){toast('沒有照片可做短片（先在日記加照片）');return;}
+  if(!('MediaRecorder' in window)||!document.createElement('canvas').captureStream){toast('這台裝置的瀏覽器不支援在 App 內生成短片');return;}
+  reelBusy=true;reelCancel=false;
+  const total=Math.round(items.length*REEL_DUR+REEL_END);
+  openModal('<h3 style="margin-top:0">🎬 生成短片中…</h3><div class="muted small">共 '+items.length+' 張照片，約需 '+total+' 秒。請保持這個畫面開啟，不要切換 App。</div><div style="background:#e5e7eb;border-radius:6px;height:14px;margin-top:12px;overflow:hidden"><div id="reel-bar" style="background:#0d9488;height:100%;width:0%"></div></div><div class="muted small" id="reel-pct" style="margin-top:6px">0%</div><div class="row" style="margin-top:10px"><button class="btn" id="reel-cancel">取消生成</button></div>');
+  $('#reel-cancel').onclick=()=>{reelCancel=true;};
+  let wake=null;try{wake=await navigator.wakeLock.request('screen');}catch(_){}
+  let actx=null,asrc=null,again=null;
+  try{
+    const imgs=[];
+    for(const it of items){try{const o=await reelLoadImg(it.blob);o.day=it.day;o.date=it.date;imgs.push(o);}catch(_){}}
+    if(!imgs.length)throw new Error('照片讀取失敗');
+    const canvas=document.createElement('canvas');canvas.width=REEL_W;canvas.height=REEL_H;
+    const ctx=canvas.getContext('2d');
+    const vstream=canvas.captureStream(30);
+    const music=await reelMusicGet();
+    if(music){
+      try{
+        actx=new (window.AudioContext||window.webkitAudioContext)();
+        const buf=await actx.decodeAudioData(await music.arrayBuffer());
+        const dest=actx.createMediaStreamDestination();
+        asrc=actx.createBufferSource();asrc.buffer=buf;asrc.loop=true;
+        again=actx.createGain();again.gain.value=0.9;
+        asrc.connect(again);again.connect(dest);
+        dest.stream.getAudioTracks().forEach(tr=>vstream.addTrack(tr));
+      }catch(_){actx=null;asrc=null;again=null;}
+    }
+    const mime=['video/mp4;codecs=avc1.640028,mp4a.40.2','video/mp4','video/webm;codecs=vp9,opus','video/webm'].find(m=>{try{return MediaRecorder.isTypeSupported(m);}catch(_){return false;}})||'';
+    const rec=new MediaRecorder(vstream,mime?{mimeType:mime,videoBitsPerSecond:8000000}:{videoBitsPerSecond:8000000});
+    const chunks=[];rec.ondataavailable=e=>{if(e.data&&e.data.size)chunks.push(e.data);};
+    const stopped=new Promise(r=>{rec.onstop=r;});
+    const totalS=imgs.length*REEL_DUR+REEL_END;
+    function drawTitle(){ctx.save();ctx.textAlign='center';ctx.shadowColor='rgba(0,0,0,.55)';ctx.shadowBlur=12;ctx.shadowOffsetY=3;ctx.fillStyle='#fff';reelFitFont(ctx,t.name,REEL_W-120,'700',92);ctx.fillText(t.name,REEL_W/2,330);ctx.font='400 52px system-ui,sans-serif';ctx.fillText('D'+imgs[0].day+'・'+imgs[0].date,REEL_W/2,425);ctx.restore();}
+    function drawFrame(el){
+      if(el<imgs.length*REEL_DUR){
+        const i=Math.min(imgs.length-1,Math.floor(el/REEL_DUR));const lt=el-i*REEL_DUR;
+        reelDrawCover(ctx,imgs[i].im);
+        if(lt>REEL_DUR-REEL_XF&&i+1<imgs.length){ctx.save();ctx.globalAlpha=(lt-(REEL_DUR-REEL_XF))/REEL_XF;reelDrawCover(ctx,imgs[i+1].im);ctx.restore();}
+        if(i===0)drawTitle();
+      }else{
+        ctx.fillStyle='#0b3d3a';ctx.fillRect(0,0,REEL_W,REEL_H);
+        ctx.save();ctx.textAlign='center';ctx.fillStyle='#fff';reelFitFont(ctx,t.name,REEL_W-120,'700',76);ctx.fillText(t.name,REEL_W/2,REEL_H/2-30);
+        ctx.fillStyle='#9fd8d2';ctx.font='400 52px system-ui,sans-serif';ctx.fillText('@backpacking_mike',REEL_W/2,REEL_H/2+55);ctx.restore();
+      }
+    }
+    drawFrame(0);
+    rec.start(250);
+    if(actx&&asrc){try{await actx.resume();asrc.start();}catch(_){}}
+    const t0=performance.now();
+    await new Promise(done=>{(function tick(){
+      if(reelCancel){done();return;}
+      const el=(performance.now()-t0)/1000;
+      drawFrame(Math.min(el,totalS));
+      const pct=Math.min(100,Math.round(el/totalS*100));const bar=$('#reel-bar'),pc=$('#reel-pct');if(bar)bar.style.width=pct+'%';if(pc)pc.textContent=pct+'%';
+      if(again){const remain=totalS-el;again.gain.value=remain<2?Math.max(0,remain/2)*0.9:0.9;}
+      if(el>=totalS){done();return;}
+      requestAnimationFrame(tick);})();});
+    try{rec.stop();}catch(_){}
+    if(asrc){try{asrc.stop();}catch(_){}}
+    if(actx){try{actx.close();}catch(_){}}
+    await stopped;
+    imgs.forEach(o=>URL.revokeObjectURL(o.u));
+    if(reelCancel){closeModal();toast('已取消生成');return;}
+    const type=rec.mimeType||mime||'video/webm';
+    const blob=new Blob(chunks,{type:type});
+    const ext=type.indexOf('mp4')>=0?'mp4':'webm';
+    const url=URL.createObjectURL(blob);
+    const fname=(t.name||'trailmate').replace(/[^\w\u4e00-\u9fa5-]+/g,'_')+(scope==='day'?('_D'+S.activeDay):'')+'_短片.'+ext;
+    openModal('<h3 style="margin-top:0">🎬 短片完成</h3>'
+      +'<video src="'+url+'" controls playsinline style="width:100%;border-radius:10px;background:#000"></video>'
+      +'<div class="muted small" style="margin:8px 0">'+imgs.length+' 張照片・'+Math.round(totalS)+' 秒・'+(blob.size/1048576).toFixed(1)+' MB・'+(ext==='mp4'?'MP4（可直接發 IG）':'WebM（IG 不收，可傳給 Ziggy 轉檔）')+(music?'・已配樂':'・無音樂')+'</div>'
+      +'<div class="row"><button class="btn" id="reel-close">關閉</button><button class="btn" id="reel-dl">⬇ 下載</button><button class="btn btn-primary" id="reel-share">分享</button></div>');
+    $('#reel-close').onclick=()=>{closeModal();URL.revokeObjectURL(url);};
+    $('#reel-dl').onclick=()=>{const a=document.createElement('a');a.href=url;a.download=fname;document.body.appendChild(a);a.click();a.remove();};
+    const shb=$('#reel-share');const vfile=new File([blob],fname,{type:type});
+    if(navigator.canShare&&navigator.canShare({files:[vfile]})){shb.onclick=async()=>{try{await navigator.share({files:[vfile]});}catch(_){}};}
+    else shb.style.display='none';
+  }catch(e){
+    if(actx){try{actx.close();}catch(_){}}
+    closeModal();toast('生成失敗：'+((e&&e.message)||'未知錯誤'));
+  }finally{
+    reelBusy=false;if(wake){try{wake.release();}catch(_){}}
+  }
 }
 /* ============ gpx ============ */
 function gpx(tr){
@@ -2108,11 +2213,15 @@ function bind(){
   $('#di-text').addEventListener('input',()=>{clearTimeout(saveT);$('#di-saved').textContent='輸入中…';
     saveT=setTimeout(()=>{const t=trip(S.activeTrip);if(!t)return;const di=diaryOf(t.id,S.activeDay);di.text=$('#di-text').value;di.updated=Date.now();save();$('#di-saved').textContent='已儲存 '+new Date().toLocaleTimeString('zh-TW',{hour:'2-digit',minute:'2-digit'});},700);});
   $('#di-file').onchange=e=>{addPhotos(Array.from(e.target.files||[]));e.target.value='';};
+  $('#btn-reel-day').onclick=()=>makeReel('day');
+  $('#btn-reel-trip').onclick=()=>makeReel('trip');
+  $('#reel-music-file').onchange=async e=>{const f=e.target.files&&e.target.files[0];e.target.value='';if(!f)return;try{await idbPut('music','default',f);toast('音樂已設定：'+f.name);}catch(_){toast('音樂儲存失敗');}renderReelMusicStatus();};
+  renderReelMusicStatus();
   $('#photo-bg').onclick=()=>{$('#photo-bg').style.display='none';$('#photo-big').src='';};
   $('#btn-export').onclick=exportJSON;
   $('#file-import').onchange=e=>{if(e.target.files[0])importJSON(e.target.files[0]);e.target.value='';};
   $('#btn-wipe').onclick=()=>confirmDlg('清除全部行程、日記、照片、軌跡、離線地圖？無法復原。',async()=>{
-    localStorage.removeItem(LS);await idbClear('tiles').catch(()=>{});await idbClear('photos').catch(()=>{});await idbClear('tracks').catch(()=>{});
+    localStorage.removeItem(LS);await idbClear('tiles').catch(()=>{});await idbClear('photos').catch(()=>{});await idbClear('tracks').catch(()=>{});await idbClear('music').catch(()=>{});
     S=seed();save();ensureTripDay();renderTrips();renderDiary();renderRegions();showTripsPage('trips-list-page');storageInfo();toast('已清除，回到初始狀態');});
   $('#btn-install').onclick=async()=>{if(!deferredPrompt)return;deferredPrompt.prompt();await deferredPrompt.userChoice;deferredPrompt=null;$('#btn-install').hidden=true;};
   $('#modal-bg').addEventListener('click',e=>{if(e.target.id==='modal-bg')closeModal();});
