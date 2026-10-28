@@ -705,6 +705,11 @@ nav.tabs .ic{font-size:22px;display:block;line-height:1.2;}
 .day-row:last-child{border-bottom:0;}
 .day-n{background:var(--teal);color:#fff;border-radius:8px;min-width:44px;text-align:center;font-weight:700;padding:6px 4px;font-size:13px;}
 .day-badges{font-size:12px;color:var(--muted);margin-left:auto;white-space:nowrap;}
+.day-right{margin-left:auto;text-align:right;flex:0 0 auto}
+.day-right>span{display:block}
+.day-wx{font-size:12px;color:var(--muted);white-space:nowrap;margin-top:2px}
+.day-wx:empty{display:none}
+.day-warn{color:var(--danger);font-weight:700}
 .map-wrap{position:relative;border-radius:12px;overflow:hidden;height:calc(100dvh - 250px);min-height:340px;box-shadow:0 1px 3px rgba(0,0,0,.1);}
 #map{width:100%;height:100%;background:#e8e8e8;z-index:0;}
 .fab{position:absolute;right:12px;width:46px;height:46px;border-radius:50%;border:0;background:#fff;box-shadow:0 2px 8px rgba(0,0,0,.25);font-size:20px;z-index:500;cursor:pointer;display:flex;align-items:center;justify-content:center;}
@@ -1451,6 +1456,123 @@ function renderTrips(){
   }).join('');
   el.querySelectorAll('[data-trip]').forEach(b=>b.onclick=()=>openTrip(b.getAttribute('data-trip')));
 }
+/* ============ 每日列表天氣：氣溫＋警告＋日出日落 ============ */
+/* 氣溫：優先用內建每日數據（tmin/tmax，X月常見氣候）；即時預報有值時補上。
+   日出日落：即時預報（Open-Meteo，timezone=auto，當地準確時間）只在出發前 16 天內、
+   有網路時才拿得到；其餘情況用離線太陽計算（經度時區，未計夏令時間）顯示 ≈ 約略值，
+   接近出發日時自動換成準確時間。警告只來自即時預報，離線或遠期不顯示。 */
+function dayWxTemp(s){
+  if(!s)return '';
+  if(s.tmin!=null&&s.tmax!=null)return '🌡'+s.tmin+'–'+s.tmax+'°C';
+  if(s.tmax!=null)return '🌡最高 '+s.tmax+'°C';
+  if(s.tmin!=null)return '🌡最低 '+s.tmin+'°C';
+  return '';
+}
+function dayWxCoords(tid,n){
+  try{
+    const tr=trailsFor(tid),td=tr&&tr[n-1];
+    const st=td&&td.stops&&td.stops[0];
+    if(st&&typeof st[1]==='number'&&typeof st[2]==='number')return [st[1],st[2]];
+  }catch(e){}
+  return null;
+}
+function fmtMin(m){m=((Math.round(m)%1440)+1440)%1440;return String(Math.floor(m/60)).padStart(2,'0')+':'+String(m%60).padStart(2,'0');}
+function approxSun(lat,lon,dateStr){
+  const d=new Date(dateStr+'T12:00:00Z');
+  if(isNaN(d))return null;
+  const JD=d.getTime()/86400000+2440587.5;
+  const T=(JD-2451545.0)/36525;
+  const L0=((280.46646+T*(36000.76983+T*0.0003032))%360+360)%360;
+  const M=357.52911+T*(35999.05029-T*0.0001537);
+  const Mr=M*Math.PI/180;
+  const e=0.016708634-T*(0.000042037+T*0.0000001267);
+  const C=(1.914602-T*(0.004817+T*0.000014))*Math.sin(Mr)+(0.019993-0.000101*T)*Math.sin(2*Mr)+0.000289*Math.sin(3*Mr);
+  const lambda=L0+C-0.00569-0.00478*Math.sin((125.04-1934.136*T)*Math.PI/180);
+  const epsR=(23.439291-0.013004167*T)*Math.PI/180;
+  const decl=Math.asin(Math.sin(epsR)*Math.sin(lambda*Math.PI/180));
+  const y=Math.tan(epsR/2)*Math.tan(epsR/2),L0r=L0*Math.PI/180;
+  const eq=4*(y*Math.sin(2*L0r)-2*e*Math.sin(Mr)+4*e*y*Math.sin(Mr)*Math.cos(2*L0r)-0.5*y*y*Math.sin(4*L0r)-1.25*e*e*Math.sin(2*Mr))*180/Math.PI;
+  const latR=lat*Math.PI/180;
+  const cosH=(Math.cos(90.833*Math.PI/180)-Math.sin(latR)*Math.sin(decl))/(Math.cos(latR)*Math.cos(decl));
+  if(cosH>1||cosH<-1)return null;
+  const H=Math.acos(cosH)*180/Math.PI;
+  const off=Math.round(lon/15);
+  return {rise:fmtMin(720-4*(lon+H)-eq+off*60),set:fmtMin(720-4*(lon-H)-eq+off*60)};
+}
+function wxWarn(code,wind){
+  const w=[];
+  if(code===95||code===96||code===99)w.push('⛈雷雨');
+  else if(code===65||code===66||code===67||code===82)w.push('🌧大雨');
+  else if((code>=71&&code<=77)||code===85||code===86)w.push('🌨降雪');
+  if(code===45||code===48)w.push('🌫濃霧');
+  if(wind!=null&&wind>=50)w.push('💨強風');
+  return w.join('・');
+}
+function wxCacheKey(lat,lon,date){return Math.round(lat*100)/100+','+Math.round(lon*100)/100+'|'+date;}
+function wxCacheGet(lat,lon,date){
+  try{
+    const all=JSON.parse(localStorage.getItem('tm_wx')||'{}');
+    const e=all[wxCacheKey(lat,lon,date)];
+    if(e&&Date.now()-e.ts<6*3600*1000)return e;
+  }catch(err){}
+  return null;
+}
+function wxCachePut(lat,lon,date,val){
+  try{
+    const all=JSON.parse(localStorage.getItem('tm_wx')||'{}');
+    all[wxCacheKey(lat,lon,date)]=Object.assign({ts:Date.now()},val);
+    const keys=Object.keys(all);
+    if(keys.length>200){keys.sort((a,b)=>all[a].ts-all[b].ts);for(let i=0;i<keys.length-200;i++)delete all[keys[i]];}
+    localStorage.setItem('tm_wx',JSON.stringify(all));
+  }catch(err){}
+}
+function dayWxHtml(tid,d){
+  const c=dayWxCoords(tid,d.n);
+  const live=c?wxCacheGet(c[0],c[1],d.date):null;
+  const parts=[];
+  if(live&&live.warn)parts.push('<span class="day-warn">⚠ '+esc(live.warn)+'</span>');
+  const t=dayWxTemp(d.stats)||(live&&live.tmin!=null&&live.tmax!=null?('🌡'+Math.round(live.tmin)+'–'+Math.round(live.tmax)+'°C'):'');
+  if(t)parts.push(t);
+  if(live&&live.rise&&live.set)parts.push('🌅 '+live.rise+' 🌇 '+live.set);
+  else if(c){const sun=approxSun(c[0],c[1],d.date);if(sun)parts.push('🌅 ≈'+sun.rise+' 🌇 ≈'+sun.set);}
+  return parts.join(' ');
+}
+async function refreshTripWx(tid){
+  const ds=daysOf(tid);if(!ds.length)return;
+  const today=new Date();today.setHours(0,0,0,0);
+  const maxD=new Date(today);maxD.setDate(maxD.getDate()+16);
+  const jobs=[];
+  ds.forEach(d=>{
+    const dt=new Date(d.date+'T12:00:00');
+    if(dt<today||dt>maxD)return;
+    const c=dayWxCoords(tid,d.n);if(!c)return;
+    if(wxCacheGet(c[0],c[1],d.date))return;
+    jobs.push({n:d.n,date:d.date,lat:c[0],lon:c[1]});
+  });
+  if(!jobs.length)return;
+  const fetchOne=async j=>{
+    try{
+      const ctl=new AbortController();const to=setTimeout(()=>ctl.abort(),10000);
+      const u='https://api.open-meteo.com/v1/forecast?latitude='+j.lat+'&longitude='+j.lon+'&daily=weather_code,temperature_2m_max,temperature_2m_min,wind_speed_10m_max,sunrise,sunset&timezone=auto&start_date='+j.date+'&end_date='+j.date;
+      const r=await fetch(u,{signal:ctl.signal});clearTimeout(to);
+      if(!r.ok)return null;
+      const js=await r.json(),dy=js&&js.daily;if(!dy||!dy.time||!dy.time.length)return null;
+      const hh=s=>(s||'').slice(11,16);
+      return {n:j.n,date:j.date,lat:j.lat,lon:j.lon,val:{warn:wxWarn(dy.weather_code?dy.weather_code[0]:null,dy.wind_speed_10m_max?dy.wind_speed_10m_max[0]:null),tmin:dy.temperature_2m_min?dy.temperature_2m_min[0]:null,tmax:dy.temperature_2m_max?dy.temperature_2m_max[0]:null,rise:dy.sunrise?hh(dy.sunrise[0]):null,set:dy.sunset?hh(dy.sunset[0]):null}};
+    }catch(e){return null;}
+  };
+  for(let i=0;i<jobs.length;i+=4){
+    const res=await Promise.all(jobs.slice(i,i+4).map(fetchOne));
+    res.forEach(r=>{
+      if(!r)return;
+      wxCachePut(r.lat,r.lon,r.date,r.val);
+      if(S.activeTrip===tid&&!$('#trip-detail-page').hidden){
+        const sp=document.querySelector('#td-days .day-wx[data-wxday="'+r.n+'"]');
+        if(sp)sp.innerHTML=dayWxHtml(tid,daysOf(tid)[r.n-1]);
+      }
+    });
+  }
+}
 function openTrip(id){
   S.activeTrip=id;save();ensureTripDay();
   const t=trip(id),ds=daysOf(id);
@@ -1465,10 +1587,11 @@ function openTrip(id){
     if(exd>0)badges+='💰'+fmtNum(exd);
     const st=getStay(id,d.n);
     const stayHtml=st.name?'<br><span class="muted small">🛏 '+esc(st.name)+stayStatusText(st.status)+'</span>':'';
-    return '<div class="day-row" data-day="'+d.n+'"><span class="day-n">D'+d.n+'</span><span><b>'+fmtMD(d.date)+'</b> '+esc(d.title)+stayHtml+'</span><span class="day-badges">'+badges+'</span></div>';
+    return '<div class="day-row" data-day="'+d.n+'"><span class="day-n">D'+d.n+'</span><span><b>'+fmtMD(d.date)+'</b> '+esc(d.title)+stayHtml+'</span><span class="day-right"><span class="day-badges">'+badges+'</span><span class="day-wx" data-wxday="'+d.n+'">'+dayWxHtml(id,d)+'</span></span></div>';
   }).join('');
   $('#td-days').querySelectorAll('[data-day]').forEach(r=>r.onclick=()=>openDay(id,+r.getAttribute('data-day')));
   showTripsPage('trip-detail-page');
+  refreshTripWx(id);
 }
 /* ============ 增減天數 ============ */
 function keyShift(stores,keyFn,tid,pos,delta,maxN){
